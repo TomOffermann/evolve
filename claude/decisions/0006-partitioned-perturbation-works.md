@@ -51,10 +51,28 @@ diagnoses **dense high-norm ES updates**, and proposes no mitigation. Global ES 
 that shape — it drifts from the base and loses what the base had. Partitioned ES climbs pass@1
 while holding base-level pass@16.
 
-**The mechanism link is not established, and the obvious version of it is probably wrong.**
-Partitioning does not obviously produce a sparse *aggregate* update: summed over 128 members,
-every part still receives contributions each generation. What differs is the correlation
-structure of individual perturbations, not necessarily the sparsity of ΔW.
+**The mechanism link is not established, and the obvious version of it is wrong.** Partitioning
+does not produce a sparse *aggregate* update: with 128 members over 3 parts, ~43 hit each part
+every generation, so ΔW is dense. Partitioning makes each *member's* perturbation sparse, not the
+update.
+
+**The working hypothesis is cross-block credit contamination.** To first order a global member's
+fitness is `F(W) + σΣ_q ⟨∇_q, E_q⟩`, so the estimator for block *p* carries mean-zero but
+nonzero-variance noise from every other block:
+
+    global block-p variance      ∝ (Σ_q ‖∇_q‖²) / N
+    partitioned block-p variance ∝ P·‖∇_p‖² / N
+
+Partitioning therefore wins for block *p* exactly when `‖∇_p‖² < mean_q ‖∇_q‖²` — it should help
+below-average-gradient blocks and *hurt* the dominant one. That is falsifiable, connects to
+Dominant-Layer ZO, and is mildly consistent with our per-part utility trace (out 0.41, h 0.33,
+emb 0.26). It explains the data; it is not verified.
+
+**Prior art:** the operator is not novel — MeZO-BCD perturbs and updates one block per step, and
+ZO-BCD (ICML 2021) predates it. What appears unexamined is its effect on *output diversity*: that
+literature measures convergence, wall-clock and accuracy, and arXiv:2501.19099 proves structured
+and dense perturbations have equivalent average convergence while explicitly not measuring pass@k
+or which solution is reached. See [Proposal B](../../research/proposals/B-modular-partition-diversity.md).
 
 **Next, and cheap: measure update norm and sparsity directly** for both samplers. That either
 confirms the published mechanism or shows partitioning works for a different reason — both are
