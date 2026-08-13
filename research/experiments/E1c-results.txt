@@ -1,0 +1,21 @@
+E1c  skew=[0.7, 0.2, 0.07, 0.03]  N=128  gens=400  seeds=10
+
+  baseline               mean -0.5890  worst -3.3460
+  lr x0.7                mean -0.5020  worst -2.1365
+  lr x0.5                mean -0.4664  worst -1.8436
+  sigma x1.5             mean -0.4976  worst -2.2996
+  sigma x1.5 + lr x0.7   mean -0.4562  worst -1.7822
+  RANDOM-bonus λ=0.3     mean -0.5338  worst -2.6658
+  novelty λ=0.2          mean -0.5488  worst -2.9104
+
+arm                         mean    sem        Δ     worst    sem        Δ
+sigma x1.5 + lr x0.7     -0.4562  0.007  +0.1328   -1.7822  0.081  +1.5638
+lr x0.5                  -0.4664  0.005  +0.1226   -1.8436  0.125  +1.5024
+lr x0.7                  -0.5020  0.007  +0.0870   -2.1365  0.148  +1.2095
+sigma x1.5               -0.4976  0.008  +0.0914   -2.2996  0.116  +1.0464
+RANDOM-bonus λ=0.3       -0.5338  0.011  +0.0552   -2.6658  0.228  +0.6802
+novelty λ=0.2            -0.5488  0.011  +0.0402   -2.9104  0.193  +0.4356
+baseline                 -0.5890  0.016  +0.0000   -3.3460  0.386  +0.0000
+
+sem = standard error of the mean over seeds. A Δ smaller than ~2x the
+combined sem is not a result.

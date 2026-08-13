@@ -1,0 +1,8 @@
+E8  is Proposal B structural or step size?   seeds=8 gens=250
+norm-matched global sigma = 0.005/sqrt(3) = 0.0029
+E6 reference: global 0.1406, partitioned n=1 0.2344 pass@16
+
+  global σ=0.0029 (norm-matched)      257.7s  pass@1 0.1123  pass@16 0.1567
+  global σ=0.005                      257.3s  pass@1 0.1143  pass@16 0.1401
+  global σ=0.0150                     266.0s  pass@1 0.1191  pass@16 0.1562
+  global + resolution                 273.7s  pass@1 0.1172  pass@16 0.1455

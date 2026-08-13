@@ -1,0 +1,21 @@
+E1d  skew=[0.7, 0.2, 0.07, 0.03]  N=128  gens=400  seeds=10
+
+  baseline               mean -0.5890  worst -3.3460
+  HP: σx1.5 lrx0.7       mean -0.4562  worst -1.7822
+  RANDOM-bonus λ=0.3     mean -0.5338  worst -2.6658
+  niche soft k=8         mean -0.5775  worst -3.2690
+  niche soft k=16        mean -0.5873  worst -3.3424
+  niche hard k=8         mean -0.5855  worst -3.2962
+  niche k=8 + HP         mean -0.4525  worst -1.7482
+
+arm                         mean    sem        Δ     worst    sem        Δ
+niche k=8 + HP           -0.4525  0.006  +0.1365   -1.7482  0.112  +1.5978
+HP: σx1.5 lrx0.7         -0.4562  0.007  +0.1328   -1.7822  0.081  +1.5638
+RANDOM-bonus λ=0.3       -0.5338  0.011  +0.0552   -2.6658  0.228  +0.6802
+niche soft k=8           -0.5775  0.010  +0.0115   -3.2690  0.192  +0.0770
+niche hard k=8           -0.5855  0.016  +0.0035   -3.2962  0.343  +0.0498
+niche soft k=16          -0.5873  0.013  +0.0017   -3.3424  0.250  +0.0036
+baseline                 -0.5890  0.016  +0.0000   -3.3460  0.386  +0.0000
+
+sem = standard error over seeds. A Δ smaller than ~2x the combined sem
+is not a result.

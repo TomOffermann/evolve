@@ -1,0 +1,21 @@
+E7  novelty vs control at full power   seeds=8 gens=250
+E4 reference (8 seeds, hand-rolled): novelty .2 0.1880 vs RANDOM .2 0.1479
+
+  no mechanism            280.2s  pass@1 0.1172  pass@16 0.1479
+  novelty λ=0.2           265.1s  pass@1 0.1118  pass@16 0.1680
+  novelty λ=0.4          1407.4s  pass@1 0.1060  pass@16 0.2007
+  RANDOM λ=0.2 (ctrl)     669.2s  pass@1 0.1147  pass@16 0.1548
+  RANDOM λ=0.4 (ctrl)     483.9s  pass@1 0.1182  pass@16 0.1743
+
+arm                      pass@1    sem  pass@16    sem
+no mechanism             0.1172  0.003   0.1479  0.005
+novelty λ=0.2            0.1118  0.005   0.1680  0.009
+novelty λ=0.4            0.1060  0.005   0.2007  0.013
+RANDOM λ=0.2 (ctrl)      0.1147  0.004   0.1548  0.007
+RANDOM λ=0.4 (ctrl)      0.1182  0.004   0.1743  0.008
+
+novelty vs its matched control:
+  λ=0.2: pass@16 0.1680 vs 0.1548  Δ=+0.0132  +1.1 sem   (pass@1 0.1118 vs 0.1147)
+  λ=0.4: pass@16 0.2007 vs 0.1743  Δ=+0.0264  +1.7 sem   (pass@1 0.1060 vs 0.1182)
+
+A |Δ| under ~2 sem is not a result in either direction.

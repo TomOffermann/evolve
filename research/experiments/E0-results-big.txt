@@ -1,0 +1,63 @@
+vocab=25 ctx=6 params=81328 N=256 sigma=0.02 rank=1
+predicted cos std if concentration holds: 1/sqrt(d) = 0.0035
+probe=648 ex   held-out=648 ex
+
+--- gen 0    held-out mean log-lik -3.2967 ---
+metric                              spearman rho  spread (std)
+-- RANDOM (floor)                         0.0012        0.2880
+1  param cosine (null hyp.)               0.0323        0.0035
+4  signed Hamming on delta                0.0035        0.0138
+5  per-layer energy profile              -0.0041        0.0024
+6  active subspace (Prop C)                  nan           nan
+A0 per-example fitness (Prop A)           0.8392        0.0902
+A1 own-layer delta, sketched              0.0548        0.0945
+A2 total output delta, sketched           0.1091        0.0947
+A3 total delta, TASK-PROJECTED            0.7990        0.0903
+== CEILING (behaviour on P)               0.8392        0.0902
+
+--- gen 40   held-out mean log-lik -0.9924 ---
+metric                              spearman rho  spread (std)
+-- RANDOM (floor)                         0.0008        0.2884
+1  param cosine (null hyp.)               0.0244        0.0035
+4  signed Hamming on delta                0.0094        0.0138
+5  per-layer energy profile               0.0033        0.0026
+6  active subspace (Prop C)               0.0097        0.2044
+A0 per-example fitness (Prop A)           0.7505        0.1080
+A1 own-layer delta, sketched              0.0245        0.0938
+A2 total output delta, sketched           0.0631        0.0933
+A3 total delta, TASK-PROJECTED            0.3717        0.0874
+== CEILING (behaviour on P)               0.7505        0.1080
+
+--- gen 120  held-out mean log-lik -0.9679 ---
+metric                              spearman rho  spread (std)
+-- RANDOM (floor)                         0.0077        0.2889
+1  param cosine (null hyp.)               0.0261        0.0035
+4  signed Hamming on delta                0.0076        0.0138
+5  per-layer energy profile              -0.0006        0.0021
+6  active subspace (Prop C)               0.0047        0.2038
+A0 per-example fitness (Prop A)           0.7325        0.1087
+A1 own-layer delta, sketched              0.0190        0.0944
+A2 total output delta, sketched           0.0594        0.0923
+A3 total delta, TASK-PROJECTED            0.2699        0.0840
+== CEILING (behaviour on P)               0.7325        0.1087
+
+--- gen 300  held-out mean log-lik -0.7960 ---
+metric                              spearman rho  spread (std)
+-- RANDOM (floor)                        -0.0038        0.2887
+1  param cosine (null hyp.)               0.0261        0.0035
+4  signed Hamming on delta                0.0254        0.0138
+5  per-layer energy profile               0.0069        0.0034
+6  active subspace (Prop C)               0.0083        0.2042
+A0 per-example fitness (Prop A)           0.6996        0.1166
+A1 own-layer delta, sketched              0.0316        0.0937
+A2 total output delta, sketched           0.0597        0.0923
+A3 total delta, TASK-PROJECTED            0.2660        0.0757
+== CEILING (behaviour on P)               0.6996        0.1166
+
+rho = rank correlation between the metric's pairwise distance and
+behavioural decorrelation on HELD-OUT data. Read every row against
+RANDOM (floor) and CEILING (the same behavioural measure computed on the
+probe batch -- i.e. how well behaviour transfers between batches at all).
+A0 coincides with CEILING by construction: Proposal A Tier 0 *is* that
+statistic. The ceiling is therefore a statement about how much room the
+other metrics are failing to use, not an independent oracle.

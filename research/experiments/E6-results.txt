@@ -1,0 +1,23 @@
+E6  Proposal B: partitioned perturbation   N=128 gens=250 seeds=3
+parts = ['emb', 'h', 'out']
+SFT base: pass@1 0.0547  pass@16 0.2109
+
+  global (iid)     167.4s  pass@1 0.1211  pass@16 0.1406
+  partitioned 1    168.4s  pass@1 0.1107  pass@16 0.2344
+  partitioned 2    134.1s  pass@1 0.1003  pass@16 0.2109
+  interleaved      157.7s  pass@1 0.1185  pass@16 0.1797
+
+arm                pass@1    sem        Δ  pass@16    sem        Δ
+global (iid)       0.1211  0.005  +0.0000   0.1406  0.008  +0.0000
+partitioned 1      0.1107  0.015  -0.0104   0.2344  0.031  +0.0938
+partitioned 2      0.1003  0.017  -0.0208   0.2109  0.028  +0.0703
+interleaved        0.1185  0.013  -0.0026   0.1797  0.006  +0.0391
+
+per-part utility (seed 0) -- the signal global ES cannot produce:
+  partitioned 1    emb=0.26  h=0.33  out=0.41
+  partitioned 2    emb=0.32  h=0.33  out=0.35
+  interleaved      emb=0.30  h=0.33  out=0.36
+
+Δ vs global. A partitioned arm is interesting if it holds pass@1 while
+producing a usable per-part utility trace; matching is already a result,
+since the utilities come free and global ES has no equivalent.

@@ -1,0 +1,19 @@
+E3  JEPA on pendulum   params=1792  latent=8  N=96 gens=600 seeds=3
+No stop-gradient, no EMA target encoder in ANY arm.
+
+eff_rank = effective rank of the latent batch (max = latent dim 8)
+probe R² = linear recovery of true pendulum state from the latent
+Neither can be faked by collapsing; the fitness can.
+
+  prediction only     68.6s  eff_rank 5.24  probe R² 0.724
+  var                 66.1s  eff_rank 2.48  probe R² 0.725
+  var+cov             67.2s  eff_rank 4.00  probe R² 0.712
+  var+cov+rank        68.8s  eff_rank 6.72  probe R² 0.702
+
+arm                 eff_rank    sem  probe R²    sem  latent std
+prediction only         5.24  0.316     0.724  0.002      0.0783
+var                     2.48  0.004     0.725  0.001      1.2044
+var+cov                 4.00  0.051     0.712  0.017      0.5641
+var+cov+rank            6.72  0.239     0.702  0.036      0.0843
+
+A collapsed encoder shows eff_rank -> 1, probe R² -> 0, latent std -> 0.

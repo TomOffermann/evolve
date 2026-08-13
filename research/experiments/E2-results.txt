@@ -1,0 +1,33 @@
+E2  countdown post-training   params=93824  vocab=172
+N=128 B=96 gens=250 seeds=3 k=16
+
+SFT base model:  pass@1 0.0547   pass@16 0.2109
+
+--- trace: resolution rule, seed 0 ---
+  gen   pass@1   pass@k    sigma  eff_rank  train_R
+    0   0.0859   0.1953   0.0050       5.3   0.0588
+   50   0.0938   0.1992   0.0061       4.6   0.1149
+  100   0.1172   0.1719   0.0130       6.8   0.1044
+  150   0.1211   0.1641   0.0107       3.8   0.0882
+  200   0.1055   0.1562   0.0107       6.5   0.1375
+detector: step 250  eff_rank 7.5 (ref 2.4)  log_vol -1364.2  spread 0.0101  ok
+
+  fixed σ (swept)        111.5s  pass@1 0.1055  pass@16 0.1771
+  classical 1/5-rule     116.2s  pass@1 0.0924  pass@16 0.2357
+  resolution rule        132.2s  pass@1 0.1237  pass@16 0.1641
+  res + novelty λ=.2     140.4s  pass@1 0.1068  pass@16 0.2018
+  res + RANDOM λ=.2      149.2s  pass@1 0.1172  pass@16 0.1641
+  res + niche k=8        131.1s  pass@1 0.1120  pass@16 0.1680
+
+arm                      pass@1    sem   pass@k    sem     gap  fired
+fixed σ (swept)          0.1055  0.006   0.1771  0.039  0.0716    0/3
+classical 1/5-rule       0.0924  0.010   0.2357  0.019  0.1432    0/3
+resolution rule          0.1237  0.007   0.1641  0.009  0.0404    0/3
+res + novelty λ=.2       0.1068  0.003   0.2018  0.027  0.0951    0/3
+res + RANDOM λ=.2        0.1172  0.005   0.1641  0.016  0.0469    0/3
+res + niche k=8          0.1120  0.009   0.1680  0.022  0.0560    0/3
+
+SFT base: pass@1 0.0547  pass@16 0.2109  gap 0.1562
+gap = pass@k - pass@1. A shrinking gap IS diversity collapse:
+the policy gets more reliable at one answer and loses the others.
+'fired' = seeds where the collapse detector triggered.
