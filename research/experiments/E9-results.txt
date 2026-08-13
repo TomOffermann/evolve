@@ -1,0 +1,5 @@
+E9  Pareto frontier: is partitioned structural or just slower?
+seeds=5 gens=300 checkpoints=[0, 40, 80, 130, 190, 250, 300]
+E8: partitioned 0.2319 vs best global 0.1567 pass@16 (+5.0 sem),
+    but partitioned pass@1 0.0991 vs 0.1123 -- hence this test.
+
