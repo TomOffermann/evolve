@@ -3,3 +3,37 @@ seeds=5 gens=300 checkpoints=[0, 40, 80, 130, 190, 250, 300]
 E8: partitioned 0.2319 vs best global 0.1567 pass@16 (+5.0 sem),
     but partitioned pass@1 0.0991 vs 0.1123 -- hence this test.
 
+  global (iid)        194.2s
+  partitioned n=1     200.4s
+
+--- global (iid) ---
+  gen   pass@1    sem  pass@16    sem
+    0   0.0750  0.011   0.2328  0.008
+   40   0.0953  0.005   0.2172  0.009
+   80   0.1078  0.008   0.1820  0.016
+  130   0.1148  0.005   0.1570  0.007
+  190   0.1164  0.004   0.1461  0.004
+  250   0.1195  0.003   0.1414  0.005
+  300   0.1195  0.002   0.1391  0.007
+
+--- partitioned n=1 ---
+  gen   pass@1    sem  pass@16    sem
+    0   0.0750  0.011   0.2328  0.008
+   40   0.0828  0.008   0.2422  0.011
+   80   0.0906  0.008   0.2266  0.012
+  130   0.0898  0.006   0.2352  0.018
+  190   0.0930  0.008   0.2250  0.017
+  250   0.1039  0.009   0.2281  0.014
+  300   0.1102  0.011   0.2211  0.017
+
+     partitioned point    global pass@16 at same pass@1         Δ
+  gen  40 p@1 0.0828 p@16 0.2422                0.2268    +0.0154
+  gen  80 p@1 0.0906 p@16 0.2266                0.2208    +0.0058
+  gen 130 p@1 0.0898 p@16 0.2352                0.2214    +0.0138
+  gen 190 p@1 0.0930 p@16 0.2250                0.2190    +0.0060
+  gen 250 p@1 0.1039 p@16 0.2281                0.1930    +0.0351
+  gen 300 p@1 0.1102 p@16 0.2211                0.1737    +0.0474
+
+Positive Δ at matched pass@1 => partitioned's frontier DOMINATES, and the
+gain is structural. Δ ~ 0 => both methods sit on one curve and partitioned
+is just a slower knob.

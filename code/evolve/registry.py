@@ -23,7 +23,7 @@ SAMPLING = {
     "iid":         (sampling.IIDSampler,         "default; EGGROLL's own choice"),
     "antithetic":  (sampling.AntitheticSampler,  "worse than iid (E1, provisional); halves independent directions"),
     "orthogonal":  (sampling.OrthogonalSampler,  "UNTESTED; carries a lower-MSE theorem, judge on progress/rollout"),
-    "partitioned": (sampling.PartitionedSampler, "UNTESTED; Proposal B / P2 -- the open research bet"),
+    "partitioned": (sampling.PartitionedSampler, "RECOMMENDED for sparse reward + pass@k (E8/E9: +5.0 sem vs tuned global); costs pass@1"),
 }
 
 SIGMA = {

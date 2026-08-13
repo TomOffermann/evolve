@@ -48,13 +48,15 @@ reordered them:
 
 | | Proposal | Verdict | ρ vs held-out behaviour |
 |---|---|---|---|
-| A | [Functional Signature Diversity](proposals/A-functional-signature-diversity.md) | Tier 0 validated as an instrument (E0) **and now as a mechanism** on sparse reward: +2.7 sem over its random control (E4) | **0.76 – 0.87** |
-| B | [Modular Partition Diversity](proposals/B-modular-partition-diversity.md) | untested; now the **best-motivated** survivor — it acts on update structure, not population weighting | — |
+| A | [Functional Signature Diversity](proposals/A-functional-signature-diversity.md) | Tier 0 validated as an **instrument** (E0). As a *mechanism*: **not established** — E4's +2.7 sem was measured against a control with a frozen seed; against one that varies it is +1.1/+1.7 sem ([E7](experiments/E7-results.md), [decision 0005](../claude/decisions/0005-novelty-not-established.md)) | **0.76 – 0.87** |
+| B | [Modular Partition Diversity](proposals/B-modular-partition-diversity.md) | ✅ **validated** — +5.0 sem vs tuned global (E8), frontier dominates at matched pass@1 (E9). [Decision 0006](../claude/decisions/0006-partitioned-perturbation-works.md) | — |
 | C | [Active-Subspace Diversity](proposals/C-active-subspace-diversity.md) | **falsified** as a metric; survives as variance reduction | 0.010 – 0.019 |
 
-Proposal A is in use on sparse-reward post-training; see
-[decision 0003](../claude/decisions/0003-benchmark-rebuilt-mechanisms-reopened.md) and
-[proposals/README.md](proposals/README.md).
+**Proposal B is adopted** for sparse-reward post-training where pass@k matters
+([decision 0006](../claude/decisions/0006-partitioned-perturbation-works.md)). No *weighting*
+mechanism is established ([decision 0005](../claude/decisions/0005-novelty-not-established.md)).
+The pattern: every mechanism that failed reweighted the population; the one that worked changed
+**what gets perturbed**. See [proposals/README.md](proposals/README.md).
 
 ## The benchmark was wrong, and rebuilding it changed the answer
 
@@ -75,8 +77,8 @@ What changed as a result:
 
 - **The prerequisite from [decision 0002](../claude/decisions/0002-diversity-mechanisms-not-yet-warranted.md)
   is met** — a task that actually collapses now exists.
-- **The diversity signal separated from the random control for the first time** (E2 Finding 2):
-  novelty holds pass@16 at 0.202 where the random bonus holds 0.164, i.e. nothing.
+- The diversity signal appeared to separate from its random control (E2/E4) — **later retracted**
+  when the control turned out to have a frozen RNG seed (E7, decision 0005).
 - **The classical 1/5th rule inverts under sparse reward** and a *resolution rule* replaces it
   (E2 Findings 3–4) — it matches a hand-swept σ without the sweep.
 - **A non-differentiable objective term beats its differentiable surrogates** at its own target

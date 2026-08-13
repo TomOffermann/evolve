@@ -99,9 +99,20 @@ class PartitionedSampler:
     probability pi_p, member weights must be scaled by 1/pi_p or the estimator is
     biased -- silently, and in a way that poisons any bandit built on the utilities.
 
-    Untested. E0-E4's negative results do not apply to it: every mechanism that
-    failed was a population-*reweighting* scheme, and this one changes what gets
-    perturbed instead."""
+    **Validated (decision 0006).** The first mechanism in this project to clear a
+    properly tuned control:
+
+      E8 (8 seeds): pass@16 0.2319 vs 0.1567 for the best global arm across a 5x
+      sigma sweep -- +5.0 sem. Step size does not explain it.
+      E9 (5 seeds): at matched pass@1 the advantage is positive at every checkpoint
+      and grows with training (+0.047 at pass@1 0.110). Global's pass@16 falls
+      monotonically 0.233 -> 0.139; partitioned's stays flat at ~0.22.
+
+    **Not free.** Costs ~1.8 sem of pass@1 and reaches a given pass@1 later than
+    global. Use it when pass@k matters; do not use it to optimise pass@1 alone.
+    The frontiers coincide at low pass@1 -- the advantage appears in the upper range.
+
+    Measured at 94k parameters, one task, 3 parts. Unknown at scale."""
 
     def __init__(self, parts: dict[str, list[str]] | None = None,
                  n_active: int = 1, probs: dict[str, float] | None = None,

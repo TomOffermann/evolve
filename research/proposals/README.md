@@ -3,22 +3,26 @@
 Bar for entry: an intuition a reader can judge in 30 seconds, mechanics concrete enough to
 implement, an honest cost, and a stated way for the idea to be **wrong**.
 
-> **Standing decision (2026-08-13, final revision):** **no mechanism is established.** The
-> Tier-0 novelty bonus beat its random control by +2.7 sem in E4 — but that control had a frozen
-> RNG seed and drew the identical noise every run. Against a control that varies
-> ([E7](../experiments/E7-results.md), 8 seeds) the margin falls to **+1.1/+1.7 sem**, under the
-> bar. See [decisions/0005](../../claude/decisions/0005-novelty-not-established.md).
+> **Standing decision (2026-08-13):** **[Proposal B is adopted](../../claude/decisions/0006-partitioned-perturbation-works.md)**
+> for sparse-reward post-training where pass@k matters — the first mechanism here to clear a
+> properly tuned control ([E8](../experiments/E8-results.md): +5.0 sem vs the best global arm
+> across a 5× σ sweep; [E9](../experiments/E9-results.md): frontier dominates at matched pass@1).
+> It costs ~1.8 sem of pass@1 and is measured only at 94k params on one task.
 >
-> What stands: *some* bonus raises pass@16 over no mechanism (0.148 → 0.201 at λ=0.4), novelty is
-> directionally ahead at both λ tested, and Tier-0 as an **instrument** (E0) is untouched. On
-> dense objectives with no measured collapse, step size still dominates everything.
+> **No *weighting* mechanism is established.** The Tier-0 novelty bonus beat its control by
+> +2.7 sem in E4, but that control had a frozen RNG seed; against one that varies the margin is
+> +1.1/+1.7 sem ([E7](../experiments/E7-results.md), decision 0005). Tier-0 as an **instrument**
+> (E0) is untouched.
+>
+> The pattern across all of it: the mechanisms that failed all reweighted the population;
+> the one that worked changed **what gets perturbed**.
 
 ## Status after [E0](../experiments/E0-results.md) (2026-08-12)
 
 | | Proposal | Measures diversity in | Verdict | ρ vs held-out behaviour |
 |---|---|---|---|---|
 | **A** | [Functional Signature Diversity](A-functional-signature-diversity.md) | **function space** — what the model does | **Tier 0 validated.** Tier 1 falsified. | **0.76 – 0.87** |
-| **B** | [Modular Partition Diversity](B-modular-partition-diversity.md) | **structure space** — which part was perturbed | **Untested.** Needs machinery that doesn't exist yet. | — |
+| **B** | [Modular Partition Diversity](B-modular-partition-diversity.md) | **structure space** — which part was perturbed | ✅ **Validated** (E8/E9, decision 0006). Costs pass@1. | — |
 | **C** | [Active-Subspace Diversity](C-active-subspace-diversity.md) | **geometry** — the dims the optimiser uses | **Falsified as a metric.** Survives as variance reduction. | 0.010 – 0.019 |
 
 Floor (random) 0.00 · ceiling 0.76–0.87.

@@ -39,6 +39,20 @@ Committed approach: EGGROLL + `ResolutionRule` for σ, both detectors logged. λ
 best measured pass@k setting (0.2007) and may be used deliberately, knowing a random bonus gets
 most of the way there. On dense objectives with no measured collapse, step size dominates.
 
+## Current standing (2026-08-13)
+
+**[Decision 0006](decisions/0006-partitioned-perturbation-works.md): partitioned perturbation
+works.** First mechanism here to clear a properly tuned control — E8 (8 seeds): pass@16 0.2319 vs
+0.1567 for the best global arm across a 5× σ sweep, +5.0 sem. E9 (5 seeds): at matched pass@1 the
+advantage is positive at every checkpoint and grows with training. Global's pass@16 collapses
+0.233 → 0.139; partitioned's holds at ~0.22. Costs ~1.8 sem of pass@1. 94k params, one task.
+
+Every mechanism that failed reweighted the population. The one that worked changed **what gets
+perturbed**.
+
+Next: measure update norm/sparsity directly (cheap, tests whether the published forgetting
+mechanism is the right explanation), then the retention test on a real pretrained base.
+
 ## Active Focus
 
 The project has a concrete research program now. **Settled:** EGGROLL (low-rank ES) as the
