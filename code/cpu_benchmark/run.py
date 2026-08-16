@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -36,11 +37,11 @@ from evolve.operators import sampling, sigma, weighting
 N_POP = 128
 RANK = 1
 SIGMA = 0.005
-ALPHA = 0.001
+ALPHA = 0.0005      # halved from 0.001 — smoke test showed both arms degrading
 GENERATIONS = 300
 N_PROBLEMS = 96
 EVAL_KS = (1, 4, 16)
-EVAL_EVERY = 50     # checkpoint evaluation interval
+EVAL_EVERY = 25     # finer checkpoints to see peaks
 
 
 # ------------------------------------------------------------- selective update
@@ -251,15 +252,22 @@ def run_one(arm_idx, seed, output_dir):
 
     tr = trainer_cls(obj, smp, wgt, cfg, sigma_rule=sig)
 
+    # Cosine alpha decay: full alpha at gen 0, 10% of alpha at final gen
+    alpha_min = ALPHA * 0.1
+
     # Checkpoints: evaluate pass@k at regular intervals
     checkpoints = []
 
     def on_gen(rec):
         gen = rec.generation
+        # Cosine decay on alpha
+        progress = gen / max(GENERATIONS - 1, 1)
+        tr.cfg.alpha = alpha_min + 0.5 * (ALPHA - alpha_min) * (1 + math.cos(math.pi * progress))
+
         if gen % EVAL_EVERY == 0 or gen == GENERATIONS - 1:
             rep = obj.report(ks=EVAL_KS, seed=seed) if not isinstance(obj, SelectiveObjective) \
                 else obj.inner.report(ks=EVAL_KS, seed=seed)
-            cp = {"gen": gen, "sigma": rec.sigma}
+            cp = {"gen": gen, "sigma": rec.sigma, "alpha": tr.cfg.alpha}
             cp.update(rep)
             checkpoints.append(cp)
 

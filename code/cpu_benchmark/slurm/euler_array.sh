@@ -34,7 +34,7 @@ echo "Node: $(hostname), CPUs: ${SLURM_CPUS_PER_TASK}"
 
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/../../..}"
 
-module load python/3.11 2>/dev/null || true
+module load stack/2024-06 gcc/12.2.0 python/3.11.6 2>/dev/null || true
 
 python code/cpu_benchmark/run.py \
     --arm "$ARM_IDX" \

@@ -51,12 +51,22 @@ def print_table(results, csv=False):
         f"{'arm':30s}", f"{'seeds':>5s}",
         f"{'pass@1':>8s}", f"{'sem':>6s}",
         f"{'pass@16':>8s}", f"{'sem':>6s}",
+        f"{'peak@16':>8s}", f"{'@gen':>5s}",
         f"{'Δ@16':>8s}", f"{'Δ/sem':>6s}",
         f"{'wall_s':>7s}",
     ])
     print(header)
     if not csv:
         print("-" * len(header))
+
+    def _peak_pass16(run):
+        """Best pass@16 across all checkpoints for a single run."""
+        best, best_gen = run["final"]["pass@16"], run["config"].get("generations", -1)
+        for cp in run.get("checkpoints", []):
+            if cp.get("pass@16", 0) > best:
+                best = cp["pass@16"]
+                best_gen = cp["gen"]
+        return best, best_gen
 
     base_p16 = np.array([r["final"]["pass@16"] for r in results[baseline]])
     base_p16_mean = base_p16.mean()
@@ -67,6 +77,9 @@ def print_table(results, csv=False):
         n = len(runs)
         p1 = np.array([r["final"]["pass@1"] for r in runs])
         p16 = np.array([r["final"]["pass@16"] for r in runs])
+        peaks = [_peak_pass16(r) for r in runs]
+        peak16 = np.array([p[0] for p in peaks])
+        peak_gens = [p[1] for p in peaks]
         wall = np.array([r["wall_seconds"] for r in runs])
 
         p1_mean = p1.mean()
@@ -79,10 +92,13 @@ def print_table(results, csv=False):
         pooled_sem = (p16_sem**2 + base_p16_sem**2)**0.5 if (p16_sem + base_p16_sem) > 0 else 1
         delta_sem = delta / pooled_sem if pooled_sem > 1e-9 else 0
 
+        median_peak_gen = int(np.median(peak_gens))
+
         row = sep.join([
             f"{arm:30s}", f"{n:>5d}",
             f"{p1_mean:>8.4f}", f"{p1_sem:>6.3f}",
             f"{p16_mean:>8.4f}", f"{p16_sem:>6.3f}",
+            f"{peak16.mean():>8.4f}", f"{median_peak_gen:>5d}",
             f"{delta:>+8.4f}", f"{delta_sem:>+6.1f}",
             f"{wall.mean():>7.1f}",
         ])
