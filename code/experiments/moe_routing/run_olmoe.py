@@ -528,14 +528,13 @@ def main():
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.float16,
         )
-        load_kwargs["device_map"] = "auto"
+        load_kwargs["device_map"] = {"": 0}  # force all on GPU 0
     elif args.load_in_8bit:
         from transformers import BitsAndBytesConfig
         load_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_8bit=True,
-            llm_int8_enable_fp32_cpu_offload=True,
         )
-        load_kwargs["device_map"] = "auto"
+        load_kwargs["device_map"] = {"": 0}
     elif device == "cuda":
         load_kwargs["device_map"] = "auto"
 
