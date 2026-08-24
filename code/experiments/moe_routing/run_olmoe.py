@@ -478,6 +478,8 @@ def main():
                         help="float16, bfloat16, float32, or auto")
     parser.add_argument("--load-in-8bit", action="store_true",
                         help="Load model in 8-bit (requires bitsandbytes)")
+    parser.add_argument("--load-in-4bit", action="store_true",
+                        help="Load model in 4-bit (requires bitsandbytes)")
     parser.add_argument("--n-pop", type=int, default=32)
     parser.add_argument("--rank", type=int, default=1)
     parser.add_argument("--sigma", type=float, default=0.01)
@@ -520,9 +522,19 @@ def main():
     else:
         load_kwargs["torch_dtype"] = torch.float32
 
-    if args.load_in_8bit:
+    if args.load_in_4bit:
         from transformers import BitsAndBytesConfig
-        load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+        load_kwargs["device_map"] = "auto"
+    elif args.load_in_8bit:
+        from transformers import BitsAndBytesConfig
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_enable_fp32_cpu_offload=True,
+        )
         load_kwargs["device_map"] = "auto"
     elif device == "cuda":
         load_kwargs["device_map"] = "auto"
