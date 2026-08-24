@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=evolve-cpu
-#SBATCH --array=0-95               # 6 arms × 16 seeds
+#SBATCH --array=0-159              # 10 arms × 16 seeds
 #SBATCH --time=01:00:00            # ~15 min per run, generous margin
 #SBATCH --mem-per-cpu=4G
 #SBATCH --cpus-per-task=4
@@ -23,7 +23,7 @@
 # Collect results:
 #   python code/cpu_benchmark/aggregate.py code/cpu_benchmark/results/
 
-N_ARMS=6
+N_ARMS=10
 N_SEEDS=16
 
 ARM_IDX=$((SLURM_ARRAY_TASK_ID / N_SEEDS))

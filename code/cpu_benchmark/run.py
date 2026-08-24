@@ -10,6 +10,10 @@ Arms:
     3  partitioned + selective update  DiPEC-inspired: utility-gated accumulation
     4  novelty + resolution            E7 reference: directionally positive, not established
     5  orthogonal + resolution         untested, carries a lower-MSE theorem
+    6  guided subspace + resolution    Direction A: SGES-inspired gradient subspace bias
+    7  archive seeded + resolution     Direction B: seed from high-fitness perturbation archive
+    8  fine partitioned P=8            Direction D: sub-tensor partitioning, 8 parts
+    9  fine partitioned P=16           Direction D: sub-tensor partitioning, 16 parts
 
 Usage:
     python code/cpu_benchmark/run.py --arm 2 --seed 0 --output results/
@@ -28,9 +32,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 
-from evolve.core.trainer import TrainConfig, Trainer
+from evolve.core.trainer import TrainConfig, Trainer, GenerationRecord
+from evolve.core import noise
+from evolve.core.parallel import plan_chunks
 from evolve.objectives.countdown_obj import CountdownObjective
 from evolve.operators import sampling, sigma, weighting
+
+# Experimental operators (Directions A, B, D)
+from operators import GuidedSampler, ArchiveSampler, FinePartitionedSampler
 
 # ---------------------------------------------------------------- configuration
 
@@ -197,6 +206,135 @@ class SelectiveTrainer(Trainer):
         return rec
 
 
+# ----------------------------------------------------------- gradient capture
+
+class GradientCapture:
+    """Objective wrapper that intercepts apply_update to capture the delta."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.last_delta = None
+
+    @property
+    def shapes(self):
+        return self.inner.shapes
+
+    def evaluate(self, req):
+        return self.inner.evaluate(req)
+
+    def parent_fitness(self, req):
+        return self.inner.parent_fitness(req)
+
+    def apply_update(self, delta):
+        self.last_delta = {k: v.clone() for k, v in delta.items()}
+        self.inner.apply_update(delta)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+class GuidedTrainer(Trainer):
+    """Feeds gradient direction back to GuidedSampler after each step."""
+
+    def step(self, generation):
+        rec = super().step(generation)
+        # Feed the captured gradient to the sampler
+        if hasattr(self.obj, 'last_delta') and self.obj.last_delta is not None:
+            if hasattr(self.sampler, 'record_gradient'):
+                self.sampler.record_gradient(self.obj.last_delta)
+        return rec
+
+
+# ------------------------------------------------------------ archive trainer
+
+class ArchiveTrainer(Trainer):
+    """Archives top-performing perturbations after each generation."""
+
+    def step(self, generation):
+        t0 = time.time()
+        cfg = self.cfg
+        gen_seed = noise.chunk_seed(cfg.seed * 1_000_003, generation)
+        crn_seed = noise.chunk_seed(gen_seed, 0xC12)
+
+        specs = plan_chunks(cfg.n_pop, cfg.chunk_size, gen_seed, crn_seed,
+                            self._sigma, cfg.rank, generation)
+
+        # Pass 1: evaluate
+        all_factors = []
+
+        def _eval(spec):
+            fac = self._draw(spec)
+            ev = self.obj.evaluate(self._request(spec, fac))
+            return fac, ev
+
+        results = self.executor.map(_eval, specs)
+        fitness_parts = []
+        per_example_parts = []
+        for fac, ev in results:
+            all_factors.append(fac)
+            fitness_parts.append(ev.fitness)
+            per_example_parts.append(ev.per_example)
+
+        fitness = torch.cat(fitness_parts)
+        per_example = torch.cat(per_example_parts)
+
+        # Sigma adaptation
+        if self.sigma_rule is not None:
+            parent = self.obj.parent_fitness(
+                self._request(specs[0], self._draw(specs[0])))
+            self._sigma = self.sigma_rule.update(fitness, parent)
+
+        # Weights
+        w = self.weighting.weights(fitness, per_example, self.state)
+
+        # Archive top performers (before pass 2 — we already have factors)
+        if hasattr(self.sampler, 'update_archive'):
+            # Merge all chunk factors into one dict
+            merged = {}
+            for chunk_fac in all_factors:
+                for name, (A, B) in chunk_fac.items():
+                    if name not in merged:
+                        merged[name] = ([], [])
+                    merged[name][0].append(A)
+                    merged[name][1].append(B)
+            merged = {k: (torch.cat(As), torch.cat(Bs))
+                      for k, (As, Bs) in merged.items()}
+            self.sampler.update_archive(merged, fitness)
+
+        # Pass 2: accumulate update (regenerate factors for determinism)
+        delta: dict[str, torch.Tensor] = {}
+        scale = cfg.alpha / (cfg.n_pop * self._sigma)
+        for spec in specs:
+            factors = self._draw(spec)
+            wc = w[spec.lo:spec.hi]
+            imp = self.sampler.importance(factors, cfg.n_pop)
+            if imp is not None:
+                wc = wc * imp
+            noise.accumulate_update(factors, wc, cfg.rank, into=delta)
+        self.obj.apply_update({k: v * scale for k, v in delta.items()})
+
+        # Diagnostics
+        diag = {}
+        for name, d in self.diagnostics.items():
+            try:
+                diag[name] = d.observe(generation, fitness, per_example,
+                                       self._sigma, self.obj)
+            except Exception as exc:
+                diag[name] = {"error": repr(exc)}
+
+        rec = GenerationRecord(
+            generation=generation,
+            fitness_mean=float(fitness.mean()),
+            fitness_max=float(fitness.max()),
+            fitness_std=float(fitness.std()),
+            sigma=self._sigma,
+            seconds=time.time() - t0,
+            diagnostics=diag,
+        )
+        self.history.append(rec)
+        return rec
+
+
 # ----------------------------------------------------------------- arm builders
 
 def build_arm(arm_idx, seed):
@@ -209,35 +347,69 @@ def build_arm(arm_idx, seed):
         3: "partitioned_selective",
         4: "novelty_resolution",
         5: "orthogonal_resolution",
+        6: "guided_subspace",
+        7: "archive_seeded",
+        8: "fine_partitioned_8",
+        9: "fine_partitioned_16",
     }
     name = arms[arm_idx]
 
+    # --- objective ---
     if name == "partitioned_selective":
         obj = SelectiveObjective(
+            CountdownObjective(n_problems=N_PROBLEMS, seed=seed))
+    elif name == "guided_subspace":
+        obj = GradientCapture(
             CountdownObjective(n_problems=N_PROBLEMS, seed=seed))
     else:
         obj = CountdownObjective(n_problems=N_PROBLEMS, seed=seed)
 
-    if name.startswith("partitioned"):
+    # --- sampler ---
+    if name == "guided_subspace":
+        smp = GuidedSampler(k=8, alpha=0.5)
+    elif name == "archive_seeded":
+        smp = ArchiveSampler(archive_size=64, seed_fraction=0.25)
+    elif name == "fine_partitioned_8":
+        smp = FinePartitionedSampler(n_groups=8, n_active=1)
+    elif name == "fine_partitioned_16":
+        smp = FinePartitionedSampler(n_groups=16, n_active=1)
+    elif name.startswith("partitioned"):
         smp = sampling.PartitionedSampler(n_active=1)
     elif name.startswith("orthogonal"):
         smp = sampling.OrthogonalSampler()
     else:
         smp = sampling.IIDSampler()
 
+    # --- weighting ---
     if name.startswith("novelty"):
         wgt = weighting.NoveltyBonus(lam=0.2)
     else:
         wgt = weighting.RankWeighting()
 
+    # --- sigma rule ---
     if "fixed" in name:
         sig = sigma.FixedSigma(SIGMA)
     else:
         sig = sigma.ResolutionRule(SIGMA)
 
-    trainer_cls = SelectiveTrainer if name == "partitioned_selective" else Trainer
+    # --- trainer class ---
+    if name == "partitioned_selective":
+        trainer_cls = SelectiveTrainer
+    elif name == "guided_subspace":
+        trainer_cls = GuidedTrainer
+    elif name == "archive_seeded":
+        trainer_cls = ArchiveTrainer
+    else:
+        trainer_cls = Trainer
 
     return name, obj, smp, wgt, sig, trainer_cls
+
+
+def _unwrap(obj):
+    """Get the inner CountdownObjective through any wrapper layers."""
+    while hasattr(obj, 'inner'):
+        obj = obj.inner
+    return obj
 
 
 # -------------------------------------------------------------------- run logic
@@ -265,8 +437,8 @@ def run_one(arm_idx, seed, output_dir):
         tr.cfg.alpha = alpha_min + 0.5 * (ALPHA - alpha_min) * (1 + math.cos(math.pi * progress))
 
         if gen % EVAL_EVERY == 0 or gen == GENERATIONS - 1:
-            rep = obj.report(ks=EVAL_KS, seed=seed) if not isinstance(obj, SelectiveObjective) \
-                else obj.inner.report(ks=EVAL_KS, seed=seed)
+            inner = _unwrap(obj)
+            rep = inner.report(ks=EVAL_KS, seed=seed)
             cp = {"gen": gen, "sigma": rec.sigma, "alpha": tr.cfg.alpha}
             cp.update(rep)
             checkpoints.append(cp)
@@ -277,8 +449,7 @@ def run_one(arm_idx, seed, output_dir):
     tr.close()
 
     # Final evaluation
-    final_obj = obj.inner if isinstance(obj, SelectiveObjective) else obj
-    final = final_obj.report(ks=EVAL_KS, seed=seed)
+    final = _unwrap(obj).report(ks=EVAL_KS, seed=seed)
 
     # History (compact: just fitness and sigma per generation)
     history = [{"gen": r.generation, "fitness_mean": r.fitness_mean,
@@ -324,7 +495,7 @@ def main():
     args = parser.parse_args()
 
     if args.arm == "all":
-        arms = list(range(6))
+        arms = list(range(10))
     else:
         arms = [int(args.arm)]
 
