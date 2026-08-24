@@ -658,14 +658,14 @@ def main():
         print(f"\n{'='*60}")
         print("Arm: gradient (Adam on cross-entropy, standard forward)")
         print(f"{'='*60}")
-        model_grad = copy.deepcopy(model)
+        # No deepcopy — train on the same model, restore gates after
         n_steps = args.generations * 2  # roughly match wall-clock
-        model_grad, grad_hist, grad_time = gradient_optimize_routing(
-            model_grad, tokenizer, gate_names, train_texts, device,
+        model, grad_hist, grad_time = gradient_optimize_routing(
+            model, tokenizer, gate_names, train_texts, device,
             lr=1e-3, steps=n_steps)
 
-        ppl = compute_perplexity(model_grad, tokenizer, eval_texts, device)
-        routing = compute_routing_metrics(model_grad, gate_names, tokenizer,
+        ppl = compute_perplexity(model, tokenizer, eval_texts, device)
+        routing = compute_routing_metrics(model, gate_names, tokenizer,
                                           eval_texts, device)
         print(f"  Perplexity: {ppl:.2f}  ({grad_time:.0f}s)")
         print(f"  Load balance: {routing['balance']:.4f}  "
@@ -673,9 +673,7 @@ def main():
         results["gradient"] = {
             "perplexity": ppl, "routing": routing,
             "wall_seconds": grad_time, "history": grad_hist}
-        del model_grad
-        if device == "cuda":
-            torch.cuda.empty_cache()
+        reset_gates()
 
     # ---- Arm: ES global ----
     if "es_global" in arms:
