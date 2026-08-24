@@ -48,18 +48,38 @@ from evolve.core.noise import chunk_seed, member_seed
 # Router discovery — works for OLMoE, Phi-MoE, Mixtral, DeepSeek, Qwen-MoE
 # ========================================================================
 
-def find_gate_modules(model) -> dict[str, nn.Linear]:
+def _is_linear(module) -> bool:
+    """Check if module is a linear layer (including quantized variants)."""
+    if isinstance(module, nn.Linear):
+        return True
+    # bitsandbytes quantized linear layers
+    typ = type(module).__name__
+    if "Linear4bit" in typ or "Linear8bit" in typ:
+        return True
+    return hasattr(module, "weight") and hasattr(module, "in_features")
+
+
+def find_gate_modules(model) -> dict[str, nn.Module]:
     """Auto-discover MoE gate/router linear layers."""
+    # Common gate/router names across MoE architectures
+    gate_names = {"gate", "gate_proj", "router", "w_gate"}
     gates = {}
     for name, module in model.named_modules():
         short = name.split(".")[-1]
-        # Common gate names across MoE architectures
-        if short in ("gate", "gate_proj", "router", "w_gate") and isinstance(module, nn.Linear):
+        if short in gate_names and _is_linear(module):
             gates[name] = module
     if not gates:
+        # Debug: print all module names to help identify the gate
+        print("\nDEBUG: No gate layers found. All module names:")
+        for name, module in model.named_modules():
+            if _is_linear(module):
+                short = name.split(".")[-1]
+                print(f"  {name}  ({type(module).__name__}, "
+                      f"out={getattr(module, 'out_features', '?')}, "
+                      f"in={getattr(module, 'in_features', '?')})")
         raise RuntimeError(
-            "No gate layers found. Check model architecture with "
-            "model.named_modules() and adjust gate name patterns.")
+            "No gate layers found. See module list above and update "
+            "gate_names in find_gate_modules().")
     return gates
 
 
