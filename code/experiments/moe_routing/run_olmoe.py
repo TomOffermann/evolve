@@ -521,7 +521,8 @@ def main():
         load_kwargs["torch_dtype"] = torch.float32
 
     if args.load_in_8bit:
-        load_kwargs["load_in_8bit"] = True
+        from transformers import BitsAndBytesConfig
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         load_kwargs["device_map"] = "auto"
     elif device == "cuda":
         load_kwargs["device_map"] = "auto"
