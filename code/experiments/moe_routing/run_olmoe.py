@@ -48,50 +48,62 @@ from evolve.core.noise import chunk_seed, member_seed
 # Router discovery — works for OLMoE, Phi-MoE, Mixtral, DeepSeek, Qwen-MoE
 # ========================================================================
 
-def _is_linear(module) -> bool:
-    """Check if module is a linear layer (including quantized variants)."""
+def _has_weight_param(module) -> bool:
+    """Check if module has a 2D weight parameter (linear-like)."""
     if isinstance(module, nn.Linear):
         return True
     # bitsandbytes quantized linear layers
     typ = type(module).__name__
     if "Linear4bit" in typ or "Linear8bit" in typ:
         return True
-    return hasattr(module, "weight") and hasattr(module, "in_features")
+    # Custom router modules (e.g. OlmoeTopKRouter) with nn.Parameter weight
+    if hasattr(module, "weight") and isinstance(module.weight, (nn.Parameter, torch.Tensor)):
+        if module.weight.dim() == 2:
+            return True
+    return False
+
+
+def _get_features(module) -> tuple[int, int]:
+    """Get (out_features, in_features) from a linear-like module."""
+    if hasattr(module, "out_features") and hasattr(module, "in_features"):
+        return module.out_features, module.in_features
+    if hasattr(module, "weight") and module.weight.dim() == 2:
+        return module.weight.shape[0], module.weight.shape[1]
+    raise ValueError(f"Cannot determine features for {type(module).__name__}")
 
 
 def find_gate_modules(model) -> dict[str, nn.Module]:
-    """Auto-discover MoE gate/router linear layers."""
-    # Common gate/router names across MoE architectures
+    """Auto-discover MoE gate/router layers.
+
+    Handles nn.Linear, bitsandbytes quantized layers, and custom router
+    modules like OlmoeTopKRouter that use nn.Parameter weight directly.
+    """
     gate_names = {"gate", "gate_proj", "router", "w_gate"}
     gates = {}
     for name, module in model.named_modules():
         short = name.split(".")[-1]
-        if short in gate_names and _is_linear(module):
+        if short in gate_names and _has_weight_param(module):
             gates[name] = module
     if not gates:
-        # Debug: print all module names to help identify the gate
-        print("\nDEBUG: No gate layers found. All module names:")
+        print("\nDEBUG: No gate layers found. Showing all modules with weight params:")
         for name, module in model.named_modules():
-            if _is_linear(module):
-                short = name.split(".")[-1]
-                print(f"  {name}  ({type(module).__name__}, "
-                      f"out={getattr(module, 'out_features', '?')}, "
-                      f"in={getattr(module, 'in_features', '?')})")
-        raise RuntimeError(
-            "No gate layers found. See module list above and update "
-            "gate_names in find_gate_modules().")
+            if _has_weight_param(module):
+                out, inp = _get_features(module)
+                print(f"  {name}  ({type(module).__name__}, out={out}, in={inp})")
+        raise RuntimeError("No gate layers found. See module list above.")
     return gates
 
 
-def get_gate_info(gates: dict[str, nn.Linear]) -> list[dict]:
+def get_gate_info(gates: dict[str, nn.Module]) -> list[dict]:
     """Extract shapes and metadata from discovered gates."""
     info = []
     for name, module in gates.items():
+        out_f, in_f = _get_features(module)
         info.append({
             "name": name,
-            "out_features": module.out_features,   # n_experts
-            "in_features": module.in_features,      # hidden_dim
-            "n_params": module.weight.numel(),
+            "out_features": out_f,   # n_experts
+            "in_features": in_f,     # hidden_dim
+            "n_params": out_f * in_f,
         })
     return info
 
