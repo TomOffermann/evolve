@@ -235,13 +235,18 @@ def compute_routing_metrics(model, gate_names, tokenizer, texts, device,
 
     def make_hook(gate_name):
         def hook_fn(module, args, output):
-            # output is the gate logits: (batch, seq_len, n_experts) or (batch, n_experts)
+            # OlmoeTopKRouter returns (router_logits, top_k_weights, top_k_indices)
+            # Other routers may return a single tensor
             with torch.no_grad():
-                if output.dim() == 3:
-                    chosen = output.argmax(dim=-1).reshape(-1)
+                if isinstance(output, tuple):
+                    # Use top_k_indices directly (3rd element) for chosen experts
+                    top_k_indices = output[2]  # (tokens, top_k)
+                    chosen = top_k_indices.reshape(-1)
+                    n_exp = output[0].shape[-1]  # from router_logits
                 else:
-                    chosen = output.argmax(dim=-1).reshape(-1)
-                n_exp = output.shape[-1]
+                    logits = output
+                    chosen = logits.argmax(dim=-1).reshape(-1)
+                    n_exp = logits.shape[-1]
                 counts = torch.bincount(chosen.cpu(), minlength=n_exp).float()
                 routing_counts[gate_name] = routing_counts.get(
                     gate_name, torch.zeros(n_exp)) + counts
