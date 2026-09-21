@@ -305,7 +305,9 @@ def measure(obj, *, P, sig, n_actives, n_pop, rank, seed, rep, gen_fit, gen_held
                              (1.0 - H @ H.T)[iu[0], iu[1]])
 
     rows = []
-    for k in n_actives:
+    r1 = None
+    # r1 must be measured before any k > 1 can be normalised against it.
+    for k in sorted(set(n_actives) | {1}):
         if k >= P_eff:
             continue
         Mk, Fk, ds, _ = _population(obj, P=P, n_active=k, sig=sig, n_pop=n_pop,
@@ -329,11 +331,32 @@ def measure(obj, *, P, sig, n_actives, n_pop, rank, seed, rep, gen_fit, gen_held
             part_cosines(U1, Uk_full[torch.randperm(P_eff, generator=g)])
             for _ in range(n_shuffles)]).mean()
 
+        # Reliability of the k-population fit itself. Without it the raw ratio
+        # part_cos(k)/part_cos(1) conflates two things: cross terms (what we want)
+        # and the k-fit simply being noisier (k parts of first-order noise per
+        # member, overlapping masks, worse conditioning). Under PERFECT
+        # superposition E[cos(u1, uk)] ~ sqrt(r1 * rk), so dividing by that is
+        # ~1 regardless of how hard the k-regression is.
+        if k == 1:
+            rk = float(pc.mean())          # U1 vs an independent k=1 population
+            r1 = rk
+        else:
+            Mk2, Fk2, _, _ = _population(obj, P=P, n_active=k, sig=sig, n_pop=n_pop,
+                                         rank=rank, tag=base ^ (0xB00 * k) ^ 0x2B2B,
+                                         gen=gen_fit, lam=lam, kind=kind,
+                                         crn_draws=crn_draws, bank_cache=bank_cache,
+                                         device=device)
+            rk = float(part_cosines(Uk_full, fit_U(Mk2, Fk2, lam)).mean())
+        denom = (r1 * rk) ** 0.5 if (r1 or 0) > 0 and rk > 0 else float("nan")
+
         rows.append({
             "P": P_eff, "n_active": k, "sigma": sig, "repeat": rep, "readout": kind,
             "part_cos": float(pc.mean()),
             "part_cos_sem": float(pc.std() / P_eff ** 0.5),
             "part_cos_shuffled": float(pc_shuf),
+            "r_k": rk,
+            "r_1": r1,
+            "additivity_star": float(pc.mean()) / denom if denom == denom else float("nan"),
             "in_regime": in_regime,
             "transfer": transfer,
             "transfer_ratio": transfer / in_regime if abs(in_regime) > 1e-3 else float("nan"),
@@ -453,10 +476,10 @@ def main():
             rows.extend(cells)
             print(f"\n  P={P}  sigma={sig:g}  readout={args.readout}  "
                   f"N={args.n_pop}  repeats={args.repeats}")
-            print(f"  {'n_act':>6} {'part_cos':>10} {'shuffled':>10} "
-                  f"{'additivity':>11} {'in_regime':>10} {'transfer':>9} {'rho_parts':>10}")
+            print(f"  {'n_act':>6} {'part_cos':>10} {'shuffled':>10} {'r_k':>7} "
+                  f"{'additivity':>11} {'additivity*':>12} {'in_regime':>10} {'rho_parts':>10}")
             ceiling = None
-            for na in args.n_active:
+            for na in sorted(set(args.n_active) | {1}):
                 sub = [c for c in cells if c["n_active"] == na]
                 if not sub:
                     continue
@@ -465,11 +488,13 @@ def main():
                 ir, _ = mean_sem([c["in_regime"] for c in sub])
                 tf, _ = mean_sem([c["transfer"] for c in sub])
                 rp, _ = mean_sem([c["rho_parts_vs_heldout"] for c in sub])
+                rk_, _ = mean_sem([c["r_k"] for c in sub])
+                ast_, ast_s = mean_sem([c["additivity_star"] for c in sub])
                 if ceiling is None:
                     ceiling = pc          # n_active=1, independent population
                 add = pc / ceiling if ceiling and abs(ceiling) > 1e-6 else float("nan")
-                print(f"  {na:>6} {pc:>+10.3f} {shf:>+10.3f} {add:>+11.3f} "
-                      f"{ir:>+10.3f} {tf:>+9.3f} {rp:>+10.3f}")
+                print(f"  {na:>6} {pc:>+10.3f} {shf:>+10.3f} {rk_:>+7.3f} {add:>+11.3f} "
+                      f"{ast_:>+8.3f}+/-{ast_s:.2f} {ir:>+10.3f} {rp:>+10.3f}")
 
     out = Path(args.output); out.mkdir(parents=True, exist_ok=True)
     path = out / f"e12_additivity_{args.readout}_seed{args.seed}_g{args.train_gens}.json"
@@ -477,8 +502,9 @@ def main():
                                 "n_params": obj.n_params(), "rows": rows,
                                 "wall_seconds": time.time() - t0}, indent=2))
     print(f"\nwrote {path}  ({time.time() - t0:.0f}s)")
-    print("  additivity ~ 1 across n_active -> superposition holds, decoding is real")
-    print("  additivity falling in n_active -> cross terms dominate, decoding dead")
+    print("  additivity* ~ 1 across n_active -> superposition holds; any drop in the raw")
+    print("                                    ratio was estimation noise, not cross terms")
+    print("  additivity* falling in n_active -> genuine cross terms")
     print("  shuffled far from 0            -> pipeline broken, ignore the rest")
     print("  in_regime is NOT additivity: it is how much the mask explains at all")
 

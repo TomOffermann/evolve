@@ -136,7 +136,8 @@ def main():
                                 "wall_seconds": time.time() - t0}, indent=2))
     print(f"\nwrote {path}  ({time.time() - t0:.0f}s)")
     print("  part_cos ~ 0        -> no reproducible part effect; u_p is noise")
-    print("  part_cos rises with sigma but NOT with N -> second-order, as predicted")
+    print("  at small sigma N barely helps; at large sigma ONLY N helps  -> two-regime law:")
+    print("      r = n s^2 a / (n s^2 a + 1 + s^2 b)   (E12-results, fit rmse 0.044 at P=8)")
     print("  part_cos > ~0.6     -> u_p is estimable; the part machinery has a basis")
 
 
