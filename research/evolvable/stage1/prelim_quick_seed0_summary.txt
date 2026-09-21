@@ -1,0 +1,50 @@
+Stage 1 summary: budget=3000 reward evaluations, n=64, seeds=1 (means over seeds; medians censored at budget+1)
+
+A. Representation and landscape
+rep               capLR    decod      eps    epsTr   kFresh   kTrans    coact     band   active     dead   lemmaV
+ideal             1.000    1.000    0.569    0.571     33.0     32.5    0.246     0.92     32.0     0.00        0
+random            0.776    0.831    0.713    0.736     32.5     25.5    0.286     0.89     34.3     0.03        0
+autoencoder       0.974    0.990    0.656    0.693     30.5     26.0    0.248     0.79     32.0     0.00        0
+multitask         1.000    1.000    0.626    0.638     31.0     25.0    0.252     0.81     32.2     0.00        0
+multitask_co      0.999    1.000    0.297    0.317     25.5     23.5    0.057     0.93     15.6     0.00        0
+eil               0.948    0.998    0.653    0.692     35.0     27.0    0.241     0.71     31.5     0.00        0
+eil_full          1.000    1.000    0.636    0.629     33.0     25.0    0.236     0.79     31.3     0.00        0
+
+B. Fresh held-out tasks, reward-only adaptation from scratch
+rep               11s90    11m90    11s95    11rel    11auc   11test    1Ls95   1Ltest   CMAs90   CMAm90   CMAauc  CMAtest
+ideal              1.00      134     1.00      272    0.986    1.000     1.00    1.000     1.00      150    0.986    0.998
+random             0.00     3001     0.00      960    0.763    0.713     0.00    0.706     0.08     3001    0.803    0.742
+autoencoder        0.12     3001     0.00     1044    0.854    0.823     0.00    0.844     1.00      462    0.948    0.957
+multitask          1.00      172     1.00      454    0.968    0.980     1.00    0.988     1.00      182    0.983    0.996
+multitask_co       0.67      616     0.21      566    0.900    0.874     0.25    0.902     1.00      251    0.975    0.987
+eil                0.88      717     0.08      760    0.900    0.881     0.04    0.874     1.00      344    0.951    0.935
+eil_full           1.00      134     1.00      350    0.979    0.992     1.00    0.996     1.00      170    0.984    0.996
+
+C. Related-task transitions, start from the previous task's solution
+rep               11s90    11m90    11rel    11auc   11test   CMAs90   CMAm90   CMAauc  CMAtest
+ideal              1.00      103      281    0.989    1.000     1.00      145    0.988    0.998
+random             0.00     3001     1866    0.766    0.711     0.00     3001    0.792    0.734
+autoencoder        0.21     3001     1774    0.864    0.829     1.00      506    0.949    0.961
+multitask          1.00      100      404    0.979    0.986     1.00      194    0.984    0.994
+multitask_co       0.88      333      748    0.912    0.867     1.00      315    0.973    0.987
+eil                0.92      520     1100    0.914    0.889     1.00      454    0.948    0.938
+eil_full           1.00      112      480    0.981    0.988     1.00      198    0.984    0.996
+
+RQ1 Spearman correlations (pooled over seeds and non-oracle representations, per task):
+  eps vs log evals-to-0.90 (fresh)               rho=+0.267  p=0.0012
+  eps vs log evals-to-95%-of-gain (fresh)        rho=+0.169  p=0.043
+  eps vs AUC (fresh; expect negative)            rho=-0.287  p=0.00048
+  eps vs AUC (transition; expect negative)       rho=-0.393  p=1.1e-06
+  log k vs log evals-to-0.90 (transition)        rho=+0.175  p=0.036
+  log k vs log evals-to-95%-of-gain (trans.)     rho=+0.120  p=0.15
+
+Legend: capLR = test acc of a logistic head trained WITH labels (capacity reference, not reward-only);
+decod = mean linear decodability of the true factors; eps = relative epistasis along the (1+1) EA
+trajectory; kFresh/kTrans = genome positions still needed after pruning neutral drift; coact = mean
+off-diagonal P[f_i=f_j=1]; band = P(|m|<4) at the found solution; s90/s95 = fraction of runs reaching
+reward 0.90/0.95; m90 = median evals to 0.90; rel = median evals to realise 95% of the run's own
+improvement; auc = mean best-so-far reward over the budget; test = held-out accuracy of the final
+solution. 11 = (1+1) EA on the ternary genome, 1L = (1+16) EA, CMA = CMA-ES on a continuous head
+over the SAME features. ideal = true factors (oracle), random = untrained encoder (floor).
+RQ2: compare eps/k/coact of eil* with multitask/autoencoder at similar capLR/test.
+RQ3: compare Table B/C speed columns across representations, and EA vs CMA on each representation.

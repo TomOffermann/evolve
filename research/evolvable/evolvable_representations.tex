@@ -107,7 +107,7 @@
 Deployed models should keep adapting, often from nothing more than a scalar reward. Evolutionary algorithms (EAs) are the natural tool for this regime: they need only fitness values, parallelise perfectly and handle discrete, non-differentiable decisions. They also come with runtime theory. For \emph{additive} fitness landscapes, a (1+1)~EA re-adapts after a change of $k$ positions in $O(n\log k)$ evaluations.
 Whether a real adaptation problem is additive, however, is not a property of the task alone. It is a property of the \emph{representation} on which the evolved parameters act.
 This proposal makes that representation the object of study. A slow, gradient-trained encoder feeds a tiny, discrete, evolved read-out (the \emph{genome}). We ask how the encoder must be shaped so that the fitness landscape seen by the EA is nearly additive, and related tasks have nearby optima.
-We (i)~define the \emph{evolvability} of a representation as the expected number of reward evaluations an EA needs to move between related tasks; (ii)~prove that, for threshold read-outs over binary features, epistasis is bounded by feature co-activation near the decision threshold; (iii)~propose \emph{evolution-in-the-loop} meta-training, where an inner EA solves tasks and the encoder is updated by gradients at the genomes the EA found, regularised towards low epistasis; and (iv)~lay out a staged experimental plan from a synthetic task family with known ground truth to reward-only adaptation on real images, sized for CPU clusters and a single T4 GPU.
+We (i)~define the \emph{evolvability} of a representation as the expected number of reward evaluations an EA needs to move between related tasks; (ii)~prove that, for threshold read-outs over binary features, epistasis is bounded by feature co-activation near the decision threshold; (iii)~propose \emph{evolution-in-the-loop} meta-training, where an inner EA solves tasks and the encoder is updated by gradients at the genomes the EA found, regularised towards low epistasis; and (iv)~lay out a staged experimental plan from a synthetic task family with known ground truth to reward-only adaptation on real images, sized for CPU clusters and a single T4 GPU, with a direct scaling path to reward-only routing adaptation in mixture-of-experts language models.
 \end{abstract}
 
 \begin{keybox}[title={The question in one sentence}]
@@ -443,6 +443,18 @@ dSprites or Shapes3D, whose generating factors (shape, scale, position, colour, 
 \subsection{Stage 3 --- reward-only adaptation on natural images (T4)}
 Frozen pretrained backbone (e.g.\ ResNet-18 or a small ViT) with cached features. The \emph{trainable} encoder is a small head mapping these features to $n$ binary units. Tasks are binary rules over CIFAR-100 classes, for example ``is it one of these three superclasses''. Successor tasks change one class group. Deployment sees only batch accuracy.
 
+\subsection{Stage 4 --- scaling path (with large compute)}
+\label{sec:scaling}
+Stages 1--3 answer the scientific question on hardware available now (CPU cluster, one T4). With large compute, the same question transfers directly to language models, where reward-only adaptation is currently a central topic.
+\begin{itemize}
+\item \textbf{Slow system $=$ a mixture-of-experts LLM.} The ``features'' are the router inputs and the experts of the last $L'$ MoE layers (e.g.\ OLMoE, 64 experts per layer). The \textbf{genome} is a ternary or small-integer vector of per-expert routing biases $b_\ell\in\{-1,0,1\}^{K}$ (``force-exclude / neutral / prefer''), i.e.\ exactly the read-out of \cref{sec:setting}, one level up.
+\item \textbf{Deployment:} reward-only domain adaptation, where the reward is the accuracy or verifier score on a batch of prompts from a new domain. The prompt prefix up to layer $L-L'$ is computed once and shared by the whole population, so evaluating $N$ genomes costs roughly one forward pass plus $N$ short suffixes.
+\item \textbf{Shaping:} evolution-in-the-loop fine-tuning of the last-layer experts and routers. The inner EA finds routing genomes for training domains; the outer gradient updates experts and routers at those genomes, with the co-activation regulariser applied to expert co-selection (experts that are chosen together interact).
+\item \textbf{Measurements} are unchanged: $\varepsilon$ and $k$ over routing genomes, evaluations to adapt, and comparisons with test-time routing methods (C3PO), policy-gradient fine-tuning (GRPO on LoRA) and ES fine-tuning of full weights (EGGROLL-style).
+\item \textbf{Analogous instance:} a LoRA library in place of experts, with the genome as composition coefficients.
+\end{itemize}
+The small-scale stages are therefore not a toy detour. They build and validate the instruments ($\varepsilon$, $k$, evaluations-to-adapt, the lemma-derived regulariser) that the large-scale stage relies on.
+
 \subsection{Arms}
 
 \begin{center}
@@ -493,6 +505,8 @@ weeks & stage & deliverable \\
 6--8 & Stage 2 (CPU/T4) & shaping on dSprites/Shapes3D; link to disentanglement \\
 9--11 & Stage 3 (T4) & reward-only adaptation vs.\ A3--A6 \\
 12--14 & theory and write-up & RQ4 results; report \\
+\midrule
+later & Stage 4 (large compute) & MoE routing genomes and LoRA composition at LLM scale (\cref{sec:scaling}) \\
 \bottomrule
 \end{tabularx}
 \end{center}
