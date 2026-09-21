@@ -1,0 +1,38 @@
+=== Part 1: per-block estimator reliability (reference-free SNR) ===
+N=128 per estimate, 24 independent estimates per sampler
+
+48 estimates in 5.2s
+
+   block       dim  ||grad_p||    share
+     emb      5504     47.0554    0.061
+       h     55296    144.9612    0.581
+     out     33024    113.6940    0.358
+
+prediction: partitioning HELPS blocks with ||grad_p||^2 below the mean, HURTS above
+
+   block     rel(g)     rel(p)         Δ     sem  vs mean   pred    match
+     emb     0.0026     0.0030   +0.0004  0.0008     0.18   HELP       ok
+       h     0.0002     0.0002   -0.0001  0.0003     1.74   HURT       ok
+     out     0.0016     0.0007   -0.0009  0.0003     1.07   HURT       ok
+
+prediction matched on 3/3 blocks
+If the sign of Δ tracks whether ||grad_p||^2 is below the mean, the
+contamination account holds. Uniformly positive Δ means something else
+is going on -- partitioning would then help even the dominant block,
+which cross-block contamination cannot explain.
+
+
+=== Part 2: cumulative drift from base after 250 generations ===
+arXiv:2601.20861 blames dense HIGH-NORM updates for ES forgetting.
+
+  global (iid)       total ||ΔW||  13.096   pass@16 0.1458
+  partitioned n=1    total ||ΔW||   5.733   pass@16 0.2331
+
+   block           global (iid)       partitioned n=1
+     emb      3.201 (  9.8%)     1.112 (  3.4%)
+       h     10.033 ( 27.0%)     4.249 ( 11.4%)
+     out      7.785 ( 42.9%)     3.686 ( 20.3%)
+   TOTAL     13.096               5.733          
+
+Smaller drift for partitioned supports the forgetting link. Equal or
+larger drift kills it -- the effect would then be something else entirely.

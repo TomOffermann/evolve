@@ -1,0 +1,39 @@
+E11  drift at matched pass@1
+seeds=4 gens=300
+E10 pt2 (uncontrolled): partitioned drift 5.73 vs global 13.10
+
+  global (iid)        164.9s
+  partitioned n=1     175.5s
+
+--- global (iid) ---
+  gen   pass@1  pass@16    drift    sem
+    0   0.0723   0.2334    0.000  0.000
+   40   0.0928   0.2178    8.716  0.450
+   80   0.1064   0.1719   11.546  1.015
+  130   0.1201   0.1523   12.443  1.053
+  190   0.1201   0.1455   12.785  1.035
+  250   0.1211   0.1387   13.005  1.024
+  300   0.1230   0.1338   13.161  0.998
+
+--- partitioned n=1 ---
+  gen   pass@1  pass@16    drift    sem
+    0   0.0723   0.2334    0.000  0.000
+   40   0.0830   0.2500    3.065  0.061
+   80   0.0898   0.2275    3.758  0.054
+  130   0.0908   0.2461    4.412  0.049
+  190   0.1025   0.2305    5.184  0.140
+  250   0.1035   0.2334    5.712  0.190
+  300   0.1084   0.2236    6.043  0.229
+
+                 partitioned    global drift at same pass@1    ratio
+  gen  40 p@1 0.0830 drift  3.065                       4.565      0.67x
+  gen  80 p@1 0.0898 drift  3.758                       7.471      0.50x
+  gen 130 p@1 0.0908 drift  4.412                       7.886      0.56x
+  gen 190 p@1 0.1025 drift  5.184                      10.737      0.48x
+  gen 250 p@1 0.1035 drift  5.712                      10.939      0.52x
+  gen 300 p@1 0.1084 drift  6.043                      11.674      0.52x
+
+Ratio < 1 at matched pass@1 => partitioned reaches the same capability
+with a smaller parameter-space excursion, which is the property the
+forgetting paper identifies. Ratio ~ 1 => the drift gap was just less
+progress, and only the pass@k result stands.
