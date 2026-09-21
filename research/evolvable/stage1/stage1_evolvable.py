@@ -64,8 +64,15 @@ class Config:
     D: int = 16                  # latent binary factors
     dx: int = 64                 # observation dim
     noise: float = 0.05          # observation noise
-    task_size: int = 3           # |S_tau|
-    train_frac: float = 0.7      # fraction of tasks used for (meta-)training
+    task_size: int = 3           # |S_tau| of (meta-)training tasks
+    train_frac: float = 0.7      # split="random": fraction of tasks used for (meta-)training
+    max_weight: int = 1          # task weights w_j in {1..max_weight}; >1 needs redundant features
+    max_tasks: int = 4480        # cap on the size of the enumerated training family (random subset)
+    split: str = "random"        # "random": held-out tasks from the same family
+                                 # "size":   train on |S|=task_size, evaluate on |S|=test_task_size
+    test_task_size: int = 5
+    n_test_family: int = 2000    # split="size": number of sampled evaluation tasks
+    parsimony: bool = False      # EA tie-break: on equal reward prefer fewer non-zero votes
     # representation
     n: int = 64                  # number of binary features = genome length
     hidden: int = 128
@@ -118,6 +125,11 @@ def make_config(mode: str) -> Config:
 # World: latent factors -> entangled observations; task family = sparse threshold rules
 # =====================================================================================
 class World:
+    """Tasks are (S, w) with S a sorted tuple of factor indices and w a tuple of signed integer
+    weights. Label y = +1 iff z = sum_j w_j (2 s_j - 1) > 0, else -1. With |w_j| = 1 and |S| odd,
+    z is odd and never 0. The read-out m = <g,f> - 0.5 can represent y exactly on oracle features
+    that contain max_weight copies of each factor (both polarities)."""
+
     def __init__(self, cfg: Config, seed: int):
         rng = np.random.default_rng(10_000 + seed)
         self.cfg = cfg
@@ -125,23 +137,52 @@ class World:
         self.M1 = (rng.normal(size=(dx, D)) * (1.5 / math.sqrt(D))).astype(np.float32)
         self.b1 = (rng.normal(size=dx) * 0.3).astype(np.float32)
         self.M2 = (rng.normal(size=(dx, dx)) / math.sqrt(dx)).astype(np.float32)
-        # task family: all (S, a) with |S| = task_size, a in {-1,+1}^|S|
-        self.tasks = []
-        for S in itertools.combinations(range(D), cfg.task_size):
-            for a in itertools.product((-1, 1), repeat=cfg.task_size):
-                self.tasks.append((S, a))
-        T = len(self.tasks)
-        A = np.zeros((T, D), dtype=np.float32)
-        for t, (S, a) in enumerate(self.tasks):
-            A[t, list(S)] = a
-        self.A = A                                         # (T, D)
-        self.index = {task: t for t, task in enumerate(self.tasks)}
-        perm = rng.permutation(T)
-        n_train = int(cfg.train_frac * T)
-        self.train_ids = np.sort(perm[:n_train])
-        self.test_ids = np.sort(perm[n_train:])
-        self.is_test = np.zeros(T, dtype=bool)
-        self.is_test[self.test_ids] = True
+        self.tasks, self.rows, self.index = [], [], {}
+        self._test_flag = []
+        wvals = [w * sg for w in range(1, cfg.max_weight + 1) for sg in (-1, 1)]
+        fam = [(S, a) for S in itertools.combinations(range(D), cfg.task_size)
+               for a in itertools.product(wvals, repeat=cfg.task_size)]
+        if len(fam) > cfg.max_tasks:
+            fam = [fam[i] for i in np.sort(rng.choice(len(fam), cfg.max_tasks, replace=False))]
+        if cfg.split == "random":
+            perm = rng.permutation(len(fam))
+            n_train = int(cfg.train_frac * len(fam))
+            is_train = np.zeros(len(fam), bool); is_train[perm[:n_train]] = True
+            for i, task in enumerate(fam):
+                self.add_task(task, test=not is_train[i])
+        elif cfg.split == "size":
+            for task in fam:
+                self.add_task(task, test=False)
+            k = cfg.test_task_size
+            while sum(self._test_flag) < cfg.n_test_family:
+                S = tuple(sorted(rng.choice(D, k, replace=False).tolist()))
+                a = tuple(int(v) for v in rng.choice(wvals, k))
+                if (S, a) not in self.index:
+                    self.add_task((S, a), test=True)
+        else:
+            raise ValueError(cfg.split)
+        self._freeze_ids()
+        self.eval_ids = self.test_ids.copy()     # fixed pool for fresh evaluation tasks
+
+    def add_task(self, task, test: bool) -> int:
+        if task in self.index:
+            return self.index[task]
+        S, a = task
+        row = np.zeros(self.cfg.D, np.float32)
+        row[list(S)] = a
+        self.index[task] = len(self.tasks)
+        self.tasks.append(task); self.rows.append(row); self._test_flag.append(bool(test))
+        self.A = np.stack(self.rows)
+        return self.index[task]
+
+    def _freeze_ids(self):
+        flag = np.array(self._test_flag)
+        self.train_ids = np.flatnonzero(~flag)
+        self.test_ids = np.flatnonzero(flag)
+
+    @property
+    def is_test(self):
+        return np.array(self._test_flag)
 
     def sample(self, B: int, rng: np.random.Generator):
         s = rng.integers(0, 2, size=(B, self.cfg.D)).astype(np.float32)
@@ -150,28 +191,37 @@ class World:
         return s, x.astype(np.float32)
 
     def labels(self, s: np.ndarray, task_ids) -> np.ndarray:
-        """y in {-1,+1}, shape (B, len(task_ids)). Sums are odd => never zero."""
+        """y in {-1,+1}, shape (B, len(task_ids)); y = +1 iff z > 0."""
         z = (2 * s - 1) @ self.A[np.asarray(task_ids)].T
-        return np.sign(z).astype(np.float32)
+        return np.where(z > 0, 1.0, -1.0).astype(np.float32)
 
-    def successors(self, t: int):
-        """Related tasks: replace one factor of S (either sign) or flip one sign."""
+    def successor_candidates(self, t: int):
+        """Related tasks: flip the sign of one weight, or replace one factor (same |weight|,
+        either sign). Returned as (S, w) tuples (may not be registered yet)."""
         S, a = self.tasks[t]
-        out = []
+        out = set()
         for pos in range(len(S)):
-            # flip sign
             a2 = list(a); a2[pos] = -a2[pos]
-            out.append((S, tuple(a2)))
-            # replace factor
+            out.add((S, tuple(a2)))
             for j in range(self.cfg.D):
                 if j in S:
                     continue
                 for sg in (-1, 1):
                     S2 = list(S); a3 = list(a)
-                    S2[pos] = j; a3[pos] = sg
+                    S2[pos] = j; a3[pos] = sg * abs(a[pos])
                     order = np.argsort(S2)
-                    out.append((tuple(np.array(S2)[order].tolist()), tuple(np.array(a3)[order].tolist())))
-        return sorted({self.index[u] for u in out} - {t})
+                    out.add((tuple(np.array(S2)[order].tolist()), tuple(int(v) for v in np.array(a3)[order])))
+        out.discard(self.tasks[t])
+        return sorted(out)
+
+    def held_out_successor(self, t: int, rng: np.random.Generator) -> int:
+        """A successor of t that is NOT a training task (registered as held out if new)."""
+        cands = [c for c in self.successor_candidates(t)
+                 if c not in self.index or self._test_flag[self.index[c]]]
+        c = cands[rng.integers(len(cands))]
+        u = self.add_task(c, test=True)
+        self._freeze_ids()
+        return u
 
 
 def ideal_features(s: np.ndarray, n: int) -> np.ndarray:
@@ -181,14 +231,17 @@ def ideal_features(s: np.ndarray, n: int) -> np.ndarray:
     return np.tile(base, (1, reps))[:, :n].astype(np.float32)
 
 
-def ideal_genome(world: World, t: int, n: int, copies: int = 1) -> np.ndarray:
+def ideal_genome(world: World, t: int, n: int) -> np.ndarray:
+    """Analytic genome on ideal features: |w_j| copies of +/- votes on s_j and 1-s_j."""
     D = world.cfg.D
     g = np.zeros(n, dtype=np.int8)
     S, a = world.tasks[t]
-    for c in range(copies):
-        for j, aj in zip(S, a):
-            g[c * 2 * D + j] = aj
-            g[c * 2 * D + D + j] = -aj
+    for j, aj in zip(S, a):
+        sg = 1 if aj > 0 else -1
+        for c in range(abs(aj)):
+            assert (c + 1) * 2 * D <= n, "n too small for ideal genome with these weights"
+            g[c * 2 * D + j] = sg
+            g[c * 2 * D + D + j] = -sg
     return g
 
 
@@ -199,6 +252,15 @@ def fitness(feats: np.ndarray, Y: np.ndarray, G: np.ndarray) -> np.ndarray:
     """feats (B,n) in {0,1}; Y (B,K) or (B,1) in {-1,+1}; G (K,n) in {-1,0,1}. Returns (K,)."""
     m = feats @ G.T.astype(np.float32) - THETA
     return (Y * m > 0).mean(axis=0)
+
+
+def accept_mask(fc, f, Gc, G, parsimony: bool):
+    """Elitist acceptance. Without parsimony: accept if not worse (ties accepted = neutral drift).
+    With parsimony: lexicographic (reward, -#nonzero): on equal reward accept only if the
+    offspring has no more non-zero votes than the parent."""
+    if not parsimony:
+        return fc >= f
+    return (fc > f) | ((fc == f) & ((Gc != 0).sum(1) <= (G != 0).sum(1)))
 
 
 def mutate(G: np.ndarray, rng: np.random.Generator, rate: float, force: bool):
@@ -215,7 +277,7 @@ def mutate(G: np.ndarray, rng: np.random.Generator, rate: float, force: bool):
     return np.where(mask, Gm, G), mask.any(axis=1)
 
 
-def one_plus_one(feats, Y, G0, budget, target, rng, snap_evals=()):
+def one_plus_one(feats, Y, G0, budget, target, rng, snap_evals=(), parsimony=False):
     """Standard (1+1) EA (mutation rate 1/n), vectorised over K independent runs.
     Only offspring that differ from the parent are evaluated/counted (identical offspring
     carry no information). Acceptance: offspring >= parent (elitist, accepts ties).
@@ -238,7 +300,7 @@ def one_plus_one(feats, Y, G0, budget, target, rng, snap_evals=()):
             continue
         fc = fitness(feats, Y, Gc)
         evals += counted
-        acc = counted & (fc >= f)
+        acc = counted & accept_mask(fc, f, Gc, G, parsimony)
         G[acc] = Gc[acc]
         f[acc] = fc[acc]
         auc += np.where(counted, f, 0.0)
@@ -294,7 +356,7 @@ def prune_towards(feats, Y, G_start, G_final, rng, sweeps=2):
     return G, (G != G_start).sum(1)
 
 
-def one_plus_lambda(feats, Y, G0, budget, target, rng, lam):
+def one_plus_lambda(feats, Y, G0, budget, target, rng, lam, parsimony=False):
     """(1+lambda) EA with forced mutation (>=1 position changed), rate 1/n.
     Counts lam evaluations per generation (parallel workers)."""
     G = G0.copy()
@@ -307,10 +369,11 @@ def one_plus_lambda(feats, Y, G0, budget, target, rng, lam):
         Gc, _ = mutate(np.repeat(G, lam, axis=0), rng, 1.0 / n, force=True)   # (K*lam, n)
         Yr = np.repeat(Y, lam, axis=1)
         fc = fitness(feats, Yr, Gc).reshape(K, lam)
-        best = fc.argmax(axis=1)
+        key = fc - (1e-7 * (Gc != 0).sum(1).reshape(K, lam) if parsimony else 0.0)
+        best = key.argmax(axis=1)
         fb = fc[np.arange(K), best]
-        take = fb >= f
         Gb = Gc.reshape(K, lam, n)[np.arange(K), best]
+        take = accept_mask(fb, f, Gb, G, parsimony)
         G[take] = Gb[take]
         f[take] = fb[take]
         # within the generation, the best-so-far can only be credited at its end (parallel)
@@ -462,7 +525,7 @@ def train_encoder(kind: str, world: World, cfg: Config, seed: int, log=print):
             for _ in range(cfg.inner_iters):
                 Gc, _ = mutate(G, rng, 1.0 / cfg.n, force=True)
                 fc = fitness(feats, Y, Gc)
-                acc = fc >= f
+                acc = accept_mask(fc, f, Gc, G, cfg.parsimony)
                 G[acc] = Gc[acc]
                 f[acc] = fc[acc]
             archive[loc] = G
@@ -497,7 +560,7 @@ def landscape_stats(feats, Y, G_snaps, rng, pairs):
     """Relative epistasis per task (pooled over genome snapshots) + exact check of the lemma.
     feats (B,n); Y (B,K); G_snaps (S,K,n)."""
     S, K, n = G_snaps.shape
-    num = np.zeros(K); den = np.zeros(K); nz = np.zeros(K)
+    num = np.zeros(K); den = np.zeros(K); nz = np.zeros(K); pimp = np.zeros(K)
     viol = 0; checked = 0; max_ratio = 0.0
     for si in range(S):
         for k in range(K):
@@ -516,6 +579,7 @@ def landscape_stats(feats, Y, G_snaps, rng, pairs):
             d1 = np.abs(np.concatenate([fi - f0, fj - f0]))
             d2 = np.abs(fij - fi - fj + f0)
             num[k] += d2.mean(); den[k] += d1.mean(); nz[k] += (d2 > 1e-12).mean()
+            pimp[k] += (np.concatenate([fi - f0, fj - f0]) > 1e-12).mean()   # P(single mutation improves)
             # lemma: |d2| <= 2 P[f_i = f_j = 1, |m_g| < 4]
             mg = feats @ g.astype(np.float32) - THETA
             inband = (np.abs(mg) < BAND).astype(np.float32)
@@ -525,7 +589,7 @@ def landscape_stats(feats, Y, G_snaps, rng, pairs):
             if ok.any():
                 max_ratio = max(max_ratio, float((d2[ok] / bound[ok]).max()))
     eps = np.where(den > 0, num / np.maximum(den, 1e-12), np.nan)
-    return dict(eps=eps, frac_nonzero_d2=nz / S, lemma_violations=viol, lemma_checked=checked,
+    return dict(eps=eps, abs_d1=den / S, abs_d2=num / S, p_improve=pimp / S, frac_nonzero_d2=nz / S, lemma_violations=viol, lemma_checked=checked,
                 lemma_max_ratio=max_ratio)
 
 
@@ -655,6 +719,36 @@ def sanity_checks(cfg: Config, log=print):
     log(f"  [{'PASS' if c8 else 'FAIL'}] (1+1) EA on ideal features reaches reward >= 0.99 on 4 tasks "
         f"(evals to 1.0: {run['hit'].tolist()})")
     ok &= c8
+    # 9. task-family variants: weighted tasks and the size split are exactly representable by
+    #    the analytic genome on oracle features
+    for variant in (dict(max_weight=2, max_tasks=2000), dict(split="size", n_test_family=300)):
+        cv = Config(**{**asdict(cfg), **variant})
+        wv = World(cv, seed=1)
+        sv, _ = wv.sample(4000, rng)
+        fv_ = ideal_features(sv, cv.n)
+        pick = np.concatenate([rng.choice(wv.train_ids, 20, replace=False), rng.choice(wv.test_ids, 20, replace=False)])
+        accs = [fitness(fv_, wv.labels(sv, [t]), ideal_genome(wv, t, cv.n)[None])[0] for t in pick]
+        bal = abs(wv.labels(sv, pick).mean())
+        c9 = min(accs) == 1.0 and bal < 0.2
+        log(f"  [{'PASS' if c9 else 'FAIL'}] variant {variant}: {len(wv.train_ids)} train / {len(wv.test_ids)} "
+            f"held-out tasks, analytic genome min acc {min(accs):.4f}, label mean {bal:.3f}")
+        ok &= c9
+        t0_ = int(wv.test_ids[0]); u = wv.held_out_successor(t0_, rng)
+        c9b = wv.is_test[u] and u != t0_ and len(wv.tasks[u][0]) == len(wv.tasks[t0_][0])
+        log(f"  [{'PASS' if c9b else 'FAIL'}] held-out successor of {wv.tasks[t0_]} -> {wv.tasks[u]}")
+        ok &= c9b
+
+    # 10. parsimony: same reward, sparser genomes
+    s, x = world.sample(cfg.B_dep, rng)
+    tt = world.test_ids[:8]
+    F = ideal_features(s, cfg.n); Yp = world.labels(s, tt)
+    a = one_plus_one(F, Yp, np.zeros((8, cfg.n), np.int8), 3000, 2.0, np.random.default_rng(5), parsimony=False)
+    b = one_plus_one(F, Yp, np.zeros((8, cfg.n), np.int8), 3000, 2.0, np.random.default_rng(5), parsimony=True)
+    nza, nzb = (a["G"] != 0).sum(1).mean(), (b["G"] != 0).sum(1).mean()
+    c10 = nzb < nza and b["f"].mean() >= 0.99
+    log(f"  [{'PASS' if c10 else 'FAIL'}] parsimony: non-zero votes {nza:.1f} -> {nzb:.1f} "
+        f"(reward {a['f'].mean():.3f} -> {b['f'].mean():.3f}; analytic optimum has 6)")
+    ok &= c10
     log(f"SANITY: {'ALL PASSED' if ok else 'SOME FAILED -- do not trust results'}")
     log("=" * 80)
     return bool(ok)
@@ -672,13 +766,9 @@ def evaluate_representation(name, featurize, world, cfg, seed, log=print):
     """featurize(s, x) -> binary features. Returns metrics dict."""
     rng = np.random.default_rng(30_000 + seed)
     K = cfg.n_eval_tasks
-    fresh = rng.choice(world.test_ids, size=K, replace=False)
+    fresh = rng.choice(world.eval_ids, size=K, replace=False)
     # related successors that are also held-out tasks
-    succ = []
-    for t in fresh:
-        cand = [u for u in world.successors(int(t)) if world.is_test[u]]
-        succ.append(int(rng.choice(cand)))
-    succ = np.array(succ)
+    succ = np.array([world.held_out_successor(int(t), rng) for t in fresh])
 
     # fixed batches (common random numbers): deployment reward, test, measurement
     s_dep, x_dep = world.sample(cfg.B_dep, rng)
@@ -705,7 +795,8 @@ def evaluate_representation(name, featurize, world, cfg, seed, log=print):
     # ---- fresh tasks: (1+1) EA from the zero genome ----
     Z = np.zeros((K, cfg.n), np.int8)
     f0_fresh = fitness(F_dep, Y_dep, Z)
-    r1 = one_plus_one(F_dep, Y_dep, Z, cfg.budget, cfg.target, rng, snap_evals=cfg.snap_evals)
+    r1 = one_plus_one(F_dep, Y_dep, Z, cfg.budget, cfg.target, rng, snap_evals=cfg.snap_evals,
+                      parsimony=cfg.parsimony)
     te1 = np.array([fitness(F_te, Y_te[:, k:k + 1], r1["G"][k:k + 1])[0] for k in range(K)])
     rel1 = hits_from_traj(r1["traj"], f0_fresh, f0_fresh + cfg.rel_target * (r1["f"] - f0_fresh))
     h90_1 = hits_from_traj(r1["traj"], f0_fresh, np.full(K, 0.90))
@@ -715,7 +806,7 @@ def evaluate_representation(name, featurize, world, cfg, seed, log=print):
                              hit_rel=rel1.tolist(), hit90=h90_1.tolist(), k_essential=kess1.tolist(),
                              nonzero_final=(r1["G"] != 0).sum(1).tolist())
     # ---- fresh tasks: (1+lambda) EA ----
-    rl = one_plus_lambda(F_dep, Y_dep, Z, cfg.budget, cfg.target, rng, cfg.lam_pop)
+    rl = one_plus_lambda(F_dep, Y_dep, Z, cfg.budget, cfg.target, rng, cfg.lam_pop, parsimony=cfg.parsimony)
     tel = np.array([fitness(F_te, Y_te[:, k:k + 1], rl["G"][k:k + 1])[0] for k in range(K)])
     out["ea1l_fresh"] = dict(hit=rl["hit"].tolist(), auc=rl["auc"].tolist(),
                              final_dep=rl["f"].tolist(), final_test=tel.tolist())
@@ -724,7 +815,8 @@ def evaluate_representation(name, featurize, world, cfg, seed, log=print):
     # Starting from the pruned genome removes neutral drift accumulated on tau.
     G_start = Gp1
     f0_tr = fitness(F_dep, Y2_dep, G_start)
-    r2 = one_plus_one(F_dep, Y2_dep, G_start, cfg.budget, cfg.target, rng, snap_evals=cfg.snap_evals)
+    r2 = one_plus_one(F_dep, Y2_dep, G_start, cfg.budget, cfg.target, rng, snap_evals=cfg.snap_evals,
+                      parsimony=cfg.parsimony)
     te2 = np.array([fitness(F_te, Y2_te[:, k:k + 1], r2["G"][k:k + 1])[0] for k in range(K)])
     rel2 = hits_from_traj(r2["traj"], f0_tr, f0_tr + cfg.rel_target * (r2["f"] - f0_tr))
     h90_2 = hits_from_traj(r2["traj"], f0_tr, np.full(K, 0.90))
@@ -809,6 +901,8 @@ def aggregate(all_res, cfg):
             d = dict(capacity_lr=r["capacity_logreg_labels"], decodability=r["factor_decodability"],
                      eps_fresh=float(np.nanmean(r["landscape_fresh"]["eps"])),
                      eps_trans=float(np.nanmean(r["landscape_transition"]["eps"])),
+                     abs_d1=float(np.nanmean(r["landscape_fresh"].get("abs_d1", [np.nan]))),
+                     p_improve=float(np.nanmean(r["landscape_fresh"].get("p_improve", [np.nan]))),
                      k_trav=float(np.median(r["ea11_transition"]["k_travelled"])),
                      k_ess_trans=float(np.median(r["ea11_transition"]["k_essential"])),
                      k_ess_fresh=float(np.median(r["ea11_fresh"]["k_essential"])),
@@ -844,13 +938,16 @@ def rq1_correlations(all_res, cfg):
     distance predict adaptation cost? Uses censored log evals-to-0.90, the relative hit time
     and AUC (higher AUC = faster)."""
     b = cfg.budget
-    acc = {k: [] for k in ("eps", "auc", "c90", "crel", "k", "c90_t", "crel_t", "eps_t", "auc_t")}
+    acc = {k: [] for k in ("eps", "auc", "c90", "crel", "k", "c90_t", "crel_t", "eps_t", "auc_t", "d1", "d2", "pimp")}
     for seed, res in all_res.items():
         for rep, r in res.items():
             if rep == "ideal":
                 continue
             fr, tr = r["ea11_fresh"], r["ea11_transition"]
             acc["eps"] += r["landscape_fresh"]["eps"]
+            acc["d1"] += r["landscape_fresh"].get("abs_d1", [np.nan] * len(fr["auc"]))
+            acc["d2"] += r["landscape_fresh"].get("abs_d2", [np.nan] * len(fr["auc"]))
+            acc["pimp"] += r["landscape_fresh"].get("p_improve", [np.nan] * len(fr["auc"]))
             acc["auc"] += fr["auc"]
             acc["c90"] += np.log(censored(fr["hit90"], b) + 1).tolist()
             acc["crel"] += np.log(censored(fr["hit_rel"], b) + 1).tolist()
@@ -872,6 +969,9 @@ def rq1_correlations(all_res, cfg):
     corr("eps vs log evals-to-95%-of-gain (fresh)", a["eps"], a["crel"])
     corr("eps vs AUC (fresh; expect negative)", a["eps"], a["auc"])
     corr("eps vs AUC (transition; expect negative)", a["eps_t"], a["auc_t"])
+    corr("abs 1st-order effect E|D1| vs AUC (fresh)", a["d1"], a["auc"])
+    corr("abs 2nd-order effect E|D2| vs AUC (fresh)", a["d2"], a["auc"])
+    corr("P(improving mutation) vs AUC (fresh)", a["pimp"], a["auc"])
     corr("log k vs log evals-to-0.90 (transition)", a["k"], a["c90_t"])
     corr("log k vs log evals-to-95%-of-gain (trans.)", a["k"], a["crel_t"])
     return out
@@ -946,7 +1046,8 @@ def write_summary(rows, corr, cfg, outdir, log=print):
              f"seeds={rows[0]['n_seeds']} (means over seeds; medians censored at budget+1)", ""]
     lines += table("A. Representation and landscape", [
         ("capLR", "capacity_lr", ".3f"), ("decod", "decodability", ".3f"), ("eps", "eps_fresh", ".3f"),
-        ("epsTr", "eps_trans", ".3f"), ("kFresh", "k_ess_fresh", ".1f"), ("kTrans", "k_ess_trans", ".1f"),
+        ("epsTr", "eps_trans", ".3f"), ("E|D1|", "abs_d1", ".4f"), ("Pimpr", "p_improve", ".3f"),
+        ("kFresh", "k_ess_fresh", ".1f"), ("kTrans", "k_ess_trans", ".1f"),
         ("coact", "coact", ".3f"), ("band", "band", ".2f"), ("active", "active", ".1f"), ("dead", "dead", ".2f"),
         ("lemmaV", "lemma_viol", ".0f")])
     lines.append("")

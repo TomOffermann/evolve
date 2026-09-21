@@ -1,7 +1,7 @@
 % =====================================================================
 %  Evolve — Evolvable Representations (research proposal)
 %  Learning slow features that make fast evolutionary adaptation provably easy
-%  Working document (no results). Author: Tom Offermann, ETH Zürich
+%  Research proposal with first Stage-1 results. Author: Tom Offermann, ETH Zürich
 % =====================================================================
 \documentclass[11pt,a4paper]{article}
 
@@ -107,7 +107,7 @@
 Deployed models should keep adapting, often from nothing more than a scalar reward. Evolutionary algorithms (EAs) are the natural tool for this regime: they need only fitness values, parallelise perfectly and handle discrete, non-differentiable decisions. They also come with runtime theory. For \emph{additive} fitness landscapes, a (1+1)~EA re-adapts after a change of $k$ positions in $O(n\log k)$ evaluations.
 Whether a real adaptation problem is additive, however, is not a property of the task alone. It is a property of the \emph{representation} on which the evolved parameters act.
 This proposal makes that representation the object of study. A slow, gradient-trained encoder feeds a tiny, discrete, evolved read-out (the \emph{genome}). We ask how the encoder must be shaped so that the fitness landscape seen by the EA is nearly additive, and related tasks have nearby optima.
-We (i)~define the \emph{evolvability} of a representation as the expected number of reward evaluations an EA needs to move between related tasks; (ii)~prove that, for threshold read-outs over binary features, epistasis is bounded by feature co-activation near the decision threshold; (iii)~propose \emph{evolution-in-the-loop} meta-training, where an inner EA solves tasks and the encoder is updated by gradients at the genomes the EA found, regularised towards low epistasis; and (iv)~lay out a staged experimental plan from a synthetic task family with known ground truth to reward-only adaptation on real images, sized for CPU clusters and a single T4 GPU, with a direct scaling path to reward-only routing adaptation in mixture-of-experts language models.
+We (i)~define the \emph{evolvability} of a representation as the expected number of reward evaluations an EA needs to move between related tasks; (ii)~prove that, for threshold read-outs over binary features, epistasis is bounded by feature co-activation near the decision threshold; (iii)~propose \emph{evolution-in-the-loop} meta-training, where an inner EA solves tasks and the encoder is updated by gradients at the genomes the EA found, regularised towards low epistasis; and (iv)~lay out a staged experimental plan from a synthetic task family with known ground truth to reward-only adaptation on real images, sized for CPU clusters and a single T4 GPU, with a direct scaling path to reward-only routing adaptation in mixture-of-experts language models. A first Stage-1 run confirms the premise: the discrete EA's speed depends strongly on the representation (by more than an order of magnitude), far more than CMA-ES does, and per-task epistasis predicts adaptation speed. It also shows that the current synthetic world is too easy to separate shaped from generic representations, which the experiments now running address.
 \end{abstract}
 
 \begin{keybox}[title={The question in one sentence}]
@@ -512,6 +512,179 @@ later & Stage 4 (large compute) & MoE routing genomes and LoRA composition at LL
 \end{center}
 
 \paragraph{Go/no-go after Stage 1.} If, at matched capacity, R4 does not reduce $\varepsilon$ \emph{and} adaptation evaluations clearly below R1/R2, then shaping for evolvability does not work in the cleanest possible setting. The project then pivots to a measurement study (RQ1 and RQ4): which existing representations are evolvable, and why.
+
+% =====================================================================
+\section{Stage 1 in detail: protocol, first results, running experiments}
+\label{sec:stage1}
+% =====================================================================
+
+This section specifies the Stage-1 experiment exactly as implemented (\path{research/evolvable/stage1/stage1_evolvable.py}, a single CPU-only file). It then reports a first two-seed run and states the experiments currently running, each with a decision rule fixed in advance.
+
+\subsection{World and task family}
+\begin{itemize}
+\item \textbf{Latent factors} $s\in\{0,1\}^{D}$, $D=16$, i.i.d.\ Bernoulli$(\tfrac12)$.
+\item \textbf{Observations} $x = M_2\tanh\big(M_1(2s-1)+b_1+\xi\big)\in\R^{64}$, where $M_1\in\R^{64\times16}$, $M_2\in\R^{64\times64}$ and $b_1$ are fixed Gaussian and $\xi\sim\mathcal{N}(0,0.05^2I)$. The factors are recoverable but non-linearly entangled.
+\item \textbf{Tasks} $y_\tau(s)=\sign\big(\sum_{j\in S_\tau}a_j(2s_j-1)\big)$ with $|S_\tau|=3$ and $a\in\{\pm1\}^3$: $\binom{16}{3}\cdot 8 = 4480$ tasks. The sum is odd, so labels are never zero. A random 70\,\% of tasks is used for (meta-)training; the remaining 30\,\% are \emph{held out} and used only at evaluation.
+\item \textbf{Related tasks} (successors) of $\tau$: flip one sign, or replace one factor of $S_\tau$ (with either sign). That gives 81 successors per task; for transitions we use successors that are themselves held out.
+\end{itemize}
+
+\subsection{Representations compared}
+All learned encoders are the same MLP ($64\to128\to128\to n{=}64$, GELU) with binary outputs $f=\ind{h>0}$, trained with a straight-through estimator for 3000 steps (Adam).
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+name & training objective \\
+\midrule
+\texttt{ideal} & oracle: $f=[s,\,1-s,\,s,\,1-s]$ (true factors, both polarities, two copies) \\
+\texttt{random} & untrained encoder (floor) \\
+\texttt{autoencoder} & reconstruct $x$ from the binary code (MSE) \\
+\texttt{multitask} & one linear head per training task (all 3136 heads every step, BCE); strong generic baseline \\
+\texttt{multitask\_co} & \texttt{multitask} $+\;\lambda\,\mathcal{R}_{\text{co}}$ (plus a dead-unit guard) \\
+\texttt{eil} & evolution in the loop (\cref{alg:eil}): 64 tasks per step, 30 inner (1+1)-EA iterations per task visit, persistent genome per task, hinge loss with $\gamma=1$ at the found genome \\
+\texttt{eil\_full} & \texttt{eil} with margin $\gamma=4.5$ $+\;\lambda_{\text{co}}\mathcal{R}_{\text{co}}+\lambda_{\text{band}}\mathcal{R}_{\text{band}}$ \\
+\texttt{eil\_margin}, \texttt{eil\_co} & ablations: only the margin, or only the co-activation penalty \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Adaptation protocol (reward only)}
+For each seed and representation, $K=24$ held-out tasks are drawn. The draw is \emph{identical across representations}, so all comparisons are paired.
+\begin{itemize}
+\item \textbf{Reward:} accuracy on a fixed batch of 512 samples. All candidates of a run are evaluated on the same batch (common random numbers). Reported accuracy is on 4096 separate test samples.
+\item \textbf{Fresh tasks:} search starts from the zero genome. \textbf{Transitions:} search for the successor $\tau'$ starts from the solution for $\tau$, after neutral drift has been pruned from it (below).
+\item \textbf{Algorithms and budget:} 3000 reward evaluations per run.
+  \begin{itemize}
+  \item (1+1)~EA: mutation rate $1/n$ to a uniformly random other value; accepts ties; identical offspring are not evaluated.
+  \item (1+16)~EA: forced mutation.
+  \item CMA-ES on a continuous linear head (weights and bias) over the \emph{same} features, with restarts from the incumbent.
+  \end{itemize}
+\end{itemize}
+
+\subsection{Metrics and statistics}
+\begin{itemize}
+\item \textbf{Speed:} reward evaluations until the best reward first reaches $0.90$ (censored at budget$+1$); evaluations to realise 95\,\% of the run's own improvement; the area under the best-so-far reward curve (AUC).
+\item \textbf{Capacity:} held-out accuracy of the final genome, and of a logistic head trained \emph{with labels}. The latter is a reference only; it is not reward-only.
+\item \textbf{Epistasis} $\varepsilon$: at four genomes along each (1+1) trajectory (after 64, 256 and 1024 evaluations, and the final one), 256 random pairs $(i,j)$ with random new values. $\varepsilon = \sum|\Delta^2_{ij}F| / \sum|\Delta_iF|$, computed on a separate 2048-sample batch (exact, no sampling noise).
+\item \textbf{Lemma check:} for every such pair, $|\Delta^2_{ij}F|\le 2\Pr[f_i{=}f_j{=}1,\,|m|<4]$ is verified numerically.
+\item \textbf{Task distance} $k$: positions of the final genome that differ from the start genome after \emph{pruning}. Pruning reverts every position whose reversion does not lower the reward (two sweeps), which removes neutral drift.
+\item \textbf{Statistics:} paired Wilcoxon signed-rank tests over tasks $\times$ seeds (log evaluations, AUC); Spearman correlations for RQ1, pooled over non-oracle representations.
+\end{itemize}
+
+\paragraph{Correctness checks, run before every experiment.}
+\begin{itemize}
+\item Vectorised fitness equals a naive loop; labels are balanced.
+\item The analytic ideal genome has accuracy $1$ on the oracle features.
+\item The mutation operator moves a position to a uniformly random \emph{other} value.
+\item The straight-through forward pass equals the hard bits.
+\item \Cref{lem:epistasis} holds on random and oracle encoders.
+\item The (1+1)~EA on OneMax-like ternary functions stays within the bound of \cref{prop:reopt}: the measured mean is 93--98\,\% of $2enH_k$ for $k\in\{1,4,16\}$, so the bound is nearly tight.
+\end{itemize}
+
+\subsection{First results (quick mode, 2 seeds, 48 paired tasks)}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+& & \multicolumn{3}{c}{fresh held-out tasks} & \multicolumn{2}{c}{transitions} & \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-7}
+representation & $\varepsilon$ & EA evals & CMA evals & EA test acc & EA evals & CMA evals & capacity (labels)\\
+\midrule
+\texttt{ideal} (oracle) & 0.58 & 144 & 158 & 1.000 & 84 & 132 & 1.000 \\
+\texttt{random} & 0.72 & $>$3000 & $>$3000 & 0.707 & $>$3000 & $>$3000 & 0.755 \\
+\texttt{autoencoder} & 0.67 & 2585 & 434 & 0.833 & $>$3000 & 453 & 0.975 \\
+\texttt{multitask} & 0.63 & 176 & 159 & 0.986 & 111 & 161 & 1.000 \\
+\texttt{multitask\_co} & \textbf{0.30} & 702 & 248 & 0.864 & 467 & 346 & 1.000 \\
+\texttt{eil} & 0.65 & 690 & 352 & 0.883 & 594 & 461 & 0.948 \\
+\texttt{eil\_full} & 0.63 & \textbf{170} & 172 & 0.985 & \textbf{96} & 192 & 1.000 \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Stage 1, first run.} ``evals'' is the median number of reward evaluations to reach $0.90$; EA is the (1+1)~EA on the ternary genome, CMA is CMA-ES on a continuous head over the same features. All sanity checks passed; 0 lemma violations in all runs.}
+\label{tab:stage1}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/stage1_rq1.png}
+\caption{\textbf{RQ1, first run.} Left: relative epistasis vs.\ speed (AUC of best reward) per task. Right: essential genome changes $k$ vs.\ evaluations for transitions, with the additive bound $2enH_k$.}
+\label{fig:stage1rq1}
+\end{figure}
+
+\paragraph{What the first run shows.}
+\begin{enumerate}
+\item \textbf{The benchmark cannot yet separate shaped from generic representations.}
+\begin{itemize}
+\item \texttt{eil\_full} vs.\ \texttt{multitask}: median ratio of evaluations $1.05$ ($p=0.91$) on fresh tasks and $0.97$ ($p=0.49$) on transitions.
+\item Both are close to the oracle.
+\item Supervised training on 3136 tasks already recovers the true factors, so this world cannot exhibit the failure that shaping targets. RQ2/RQ3 are therefore \emph{open}, not refuted.
+\end{itemize}
+\item \textbf{Evolution-in-the-loop details matter a lot.} \texttt{eil\_full} needs $4$--$7\times$ fewer evaluations than plain \texttt{eil} ($p<10^{-13}$, paired). The prime suspect is the margin term.
+\item \textbf{Epistasis predicts speed, but it is not the whole story.}
+\begin{itemize}
+\item Per task, $\varepsilon$ correlates with speed: Spearman $\rho=-0.30$ (fresh) and $-0.41$ (transitions) against AUC, $p<10^{-6}$.
+\item But \texttt{multitask\_co} halves $\varepsilon$ and still adapts $\approx4\times$ slower, because sparse features limit what a ternary vote can express.
+\item The theory needs a second axis, \emph{read-out capacity}, next to epistasis.
+\end{itemize}
+\item \textbf{The discrete EA is far more sensitive to the representation than CMA-ES.}
+\begin{itemize}
+\item On good features, the ternary (1+1)~EA matches CMA-ES on fresh tasks and is about $2\times$ faster on transitions (\texttt{eil\_full}: 96 vs.\ 192 evaluations).
+\item On autoencoder features it collapses (2585 vs.\ 434).
+\item This directly supports the premise of the proposal: for evolutionary adaptation, the landscape is made by the representation.
+\end{itemize}
+\item \textbf{The small-$k$ regime is not reached.} Even on oracle features the EA finds dense genomes, and transitions change $\approx25$ positions where 2--4 would suffice. Sparse (parsimonious) search is needed to make the $O(n\log k)$ regime relevant.
+\end{enumerate}
+
+\subsection{Experiments currently running}
+Each run tests one explanation for the first result. Its decision rule is fixed before seeing the outcome.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}L{2.4cm}L{3.6cm}Y@{}}
+\toprule
+run & change & hypothesis and decision rule \\
+\midrule
+\textbf{Harder world} (\texttt{train\_frac}$=0.05$) & only $\approx224$ training tasks instead of 3136 & \emph{H:} with few tasks, multi-task training no longer recovers all factors, but evolution in the loop (which trains the features the EA can actually use) still does.
+\emph{Supports RQ2/3} if \texttt{eil\_full} needs significantly fewer evaluations than \texttt{multitask} on held-out tasks (paired Wilcoxon $p<0.01$) at similar test accuracy. \emph{Against} if the two remain indistinguishable. \\
+\textbf{Ablation} & \texttt{eil\_margin} (margin only) and \texttt{eil\_co} (co-activation only) & \emph{H:} the margin, i.e.\ the ``margin regime'' of \cref{rem:consequences}, explains the gain of \texttt{eil\_full} over \texttt{eil}.
+\emph{Confirmed} if \texttt{eil\_margin} $\approx$ \texttt{eil\_full} and \texttt{eil\_co} $\approx$ \texttt{eil}. \\
+\textbf{Stronger regularisers} ($\lambda_{\text{co}}=\lambda_{\text{band}}=1$) & $3\times$ larger penalties & \emph{H:} epistasis can be lowered substantially without losing capacity. It \emph{works} if $\varepsilon$ drops by $\ge30\,\%$ with test accuracy within $1$ point and no slow-down. It \emph{fails}, and confirms the capacity axis, if $\varepsilon$ drops and speed collapses as for \texttt{multitask\_co}. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Round 1 outcomes}
+Each run was judged by the decision rule stated above, before any interpretation. All tests are paired Wilcoxon over 48 tasks (2 seeds); ``evals'' is the median number of evaluations to reach $0.90$.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}L{2.3cm}Y L{2.4cm}@{}}
+\toprule
+run & result & verdict \\
+\midrule
+Harder world & \textbf{Fresh tasks:} \texttt{eil\_full} 150 vs.\ \texttt{multitask} 202 evals ($0.74\times$, $p=0.0087$); AUC $p=5\cdot10^{-5}$; test accuracy 0.994 vs.\ 0.981. \textbf{Transitions:} 98 vs.\ 107 ($p=0.41$), AUC $p=2\cdot10^{-6}$. & supported on fresh tasks (weakly, 2 seeds) \\
+Ablation & \texttt{eil\_margin} $\approx$ \texttt{eil\_full} ($p=0.32$); \texttt{eil\_co} $\approx$ \texttt{eil} ($p=0.09$); \texttt{eil\_margin} vs.\ \texttt{eil}: $0.30\times$ (fresh) and $0.17\times$ (transitions), $p<10^{-12}$ & confirmed: the margin does the work \\
+Stronger regularisers & $\varepsilon$ only $-12\,\%$; $1.41\times$ slower ($p=7\cdot10^{-6}$); test accuracy $0.986\to0.943$ & fails as predicted; capacity axis confirmed \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\paragraph{Interpretation.}
+\begin{itemize}
+\item \textbf{First separation.} In the harder world, the multi-task features remain \emph{equally informative}: the factors are perfectly decodable and a labelled logistic head is perfect. Yet the EA uses them less efficiently than features trained with evolution in the loop. This is the central claim in its cleanest form: good features for a gradient head are not the same as good features for an evolutionary head.
+\item \textbf{The margin regime of \cref{lem:epistasis} is what matters, not the sparse regime.} Redundancy that pushes examples out of the band helps; lowering co-activation removes capacity.
+\item \textbf{Relative epistasis $\varepsilon$ is not a valid predictor of adaptation cost.} Its correlation with speed changes sign across runs: $\rho=-0.30$, $+0.32$ and $+0.73$ against AUC. This is because regularisers lower $\varepsilon$ by sparsifying features, which also removes improving moves. RQ1 is therefore re-posed in terms of the first-order signal $\E|\Delta_iF|$ and the probability that a single mutation improves. Both are now measured.
+\end{itemize}
+
+\paragraph{Round 3 (running).}
+\begin{itemize}
+\item Five seeds of the harder world.
+\item A tuned, compute-matched multi-task baseline: $4\times$ more steps, re-tuned head learning rate. This closes the two open caveats, rules 2 and 4 of our experimental practice.
+\end{itemize}
+
+\paragraph{Planned code extensions.} (i)~A \emph{parsimony tie-break}: among equal rewards, prefer fewer non-zero votes. This should give sparse genomes, small $k$, and the $O(n\log k)$ regime. (ii)~A held-out \emph{task-type} split: meta-train on 3-factor rules, evaluate on 5-factor rules and on unseen factor combinations. This makes generic training fail by construction, because the evaluation tasks are not in its training distribution.
 
 % =====================================================================
 \section{Related work}
